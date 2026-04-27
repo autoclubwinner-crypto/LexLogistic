@@ -42,44 +42,42 @@ export default function App() {
     try {
       // Используем бесплатный CORS-прокси для обхода защиты серверов (чтобы сайт мог работать как простой HTML без бекенда)
       
-      // 1. Загрузка курсов валют
-      const cbrUrl = "https://www.cbr.ru/scripts/XML_daily.asp";
-      const proxyCbrUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(cbrUrl)}`;
-      
-      const ratesRes = await fetch(proxyCbrUrl).catch(() => null);
+      // 1. Загрузка курсов валют через открытый API, который не блокирует CORS
+      const ratesRes = await fetch("https://www.cbr-xml-daily.ru/daily_json.js").catch(() => null);
       if (ratesRes && ratesRes.ok) {
-        const text = await ratesRes.text();
-        const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+        const data = await ratesRes.json();
         
-        const dateStr = xmlDoc.documentElement.getAttribute("Date") || "Неизвестно";
-        const valutes = Array.from(xmlDoc.querySelectorAll("Valute"));
+        const dateStr = new Date(data.Date).toLocaleDateString("ru-RU", {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+        
         const targetCodes = ["USD", "EUR", "GEL"];
         
         const rates = targetCodes.map(code => {
-          let found = valutes.find(v => v.querySelector("CharCode")?.textContent === code);
-          if (!found) return { code, value: 0, name: "Unknown", nominal: 1 };
+          const valute = data.Valute[code];
+          if (!valute) return { code, value: 0, name: "Unknown", nominal: 1 };
           
           return {
-            id: found.getAttribute("ID") || code,
-            code: found.querySelector("CharCode")?.textContent || code,
-            name: found.querySelector("Name")?.textContent || "Unknown",
-            value: parseFloat(found.querySelector("Value")?.textContent?.replace(",", ".") || "0"),
-            nominal: parseInt(found.querySelector("Nominal")?.textContent || "1", 10)
+            id: valute.ID,
+            code: valute.CharCode,
+            name: valute.Name,
+            value: parseFloat(valute.Value),
+            nominal: parseInt(valute.Nominal, 10)
           };
         });
         
         setRatesData({ date: dateStr, rates });
       }
 
-      // 2. Загрузка новостей
+      // 2. Загрузка новостей через rss2json для обхода CORS и трансформации в JSON
       const newsUrl = "https://www.vedomosti.ru/rss/news";
-      const proxyNewsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(newsUrl)}`;
+      const rss2jsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(newsUrl)}`;
       
-      const newsRes = await fetch(proxyNewsUrl).catch(() => null);
+      const newsRes = await fetch(rss2jsonUrl).catch(() => null);
       if (newsRes && newsRes.ok) {
-        const text = await newsRes.text();
-        const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
-        const items = Array.from(xmlDoc.querySelectorAll("item"));
+        const data = await newsRes.json();
+        const items = data.items || [];
         
         const currencyAndBankKeywords = [
           'курс', 'валют', 'доллар', 'евро', 'рубл', 'юан', 
@@ -87,23 +85,22 @@ export default function App() {
           'депозит', 'ипотек', 'свифт', 'swift', 'санкци'
         ];
         
-        const parsedNewsList = items.map(item => {
-          const title = item.querySelector("title")?.textContent || "";
-          const description = item.querySelector("description")?.textContent || "";
-          const categoryNode = item.querySelector("category");
+        const parsedNewsList = items.map((item: any) => {
+          // Очистка HTML тегов из описания, если они есть
+          const cleanDescription = (item.description || "").replace(/<[^>]*>?/gm, '');
           
           return {
-            id: item.querySelector("guid")?.textContent || item.querySelector("link")?.textContent || Math.random().toString(),
-            title: title,
-            link: item.querySelector("link")?.textContent || "#",
-            date: item.querySelector("pubDate")?.textContent || "",
-            contentSnippet: description,
-            category: categoryNode?.textContent || "Новости"
+            id: item.guid || item.link || Math.random().toString(),
+            title: item.title || "",
+            link: item.link || "#",
+            date: item.pubDate || "",
+            contentSnippet: cleanDescription,
+            category: (item.categories && item.categories.length > 0) ? item.categories[0] : "Новости"
           };
         });
 
         // Фильтруем новости по нашей теме
-        let filteredNews = parsedNewsList.filter(item => {
+        let filteredNews = parsedNewsList.filter((item: any) => {
           const textToSearch = (item.title + " " + item.contentSnippet).toLowerCase();
           return currencyAndBankKeywords.some(keyword => textToSearch.includes(keyword));
         });
