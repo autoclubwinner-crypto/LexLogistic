@@ -74,47 +74,75 @@ export default function App() {
         });
       }
 
-      // 2. Загрузка новостей через rss2json для обхода CORS и трансформации в JSON
-      const newsUrl = "https://www.vedomosti.ru/rss/news";
-      // Добавляем timestamp для сброса кэша rss2json
-      const rss2jsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(newsUrl)}&_cb=${timestamp}`;
-      
-      const newsRes = await fetch(rss2jsonUrl).catch(() => null);
-      if (newsRes && newsRes.ok) {
-        const data = await newsRes.json();
-        const items = data.items || [];
-        
-        const currencyAndBankKeywords = [
-          'курс', 'валют', 'доллар', 'евро', 'рубл', 'юан', 
-          'банк', 'цб', 'центробанк', 'ставк', 'кредит', 'вклад',
-          'депозит', 'ипотек', 'свифт', 'swift', 'санкци', 'экономи', 'бизнес', 'финанс'
-        ];
-        
-        const parsedNewsList = items.map((item: any) => {
-          // Очистка HTML тегов из описания, если они есть
-          const cleanDescription = (item.description || "").replace(/<[^>]*>?/gm, '');
+      // 2. Загрузка новостей напрямую из RSS через надежный прокси с парсингом (несколько источников)
+      const rssSources = [
+        "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
+        "https://www.kommersant.ru/RSS/news.xml",
+        "https://lenta.ru/rss/news/economics"
+      ];
+
+      const allNews: NewsItem[] = [];
+
+      await Promise.allSettled(rssSources.map(async (source) => {
+        try {
+          // Использование cors-proxy (codetabs) который возвращает чистый XML без сильного кэширования
+          const url = `https://api.codetabs.com/v1/proxy?quest=${source}&_nocache=${timestamp}`;
+          const res = await fetch(url);
+          if (!res.ok) return;
           
-          return {
-            id: item.guid || item.link || Math.random().toString(),
-            title: item.title || "",
-            link: item.link || "#",
-            date: item.pubDate || "",
-            contentSnippet: cleanDescription,
-            category: (item.categories && item.categories.length > 0) ? item.categories[0] : "Новости"
-          };
-        });
+          const text = await res.text();
+          if (text.includes("429 Too Many") || text.includes("<html")) return; // Пропускаем если прокси заблочен
 
-        // Фильтруем новости по нашей теме
-        let filteredNews = parsedNewsList.filter((item: any) => {
-          const textToSearch = (item.title + " " + item.contentSnippet).toLowerCase();
-          return currencyAndBankKeywords.some(keyword => textToSearch.includes(keyword));
-        });
+          const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+          const items = Array.from(xmlDoc.querySelectorAll("item"));
+          
+          items.forEach(item => {
+            const title = item.querySelector("title")?.textContent || "";
+            const description = item.querySelector("description")?.textContent || "";
+            const cleanDescription = description.replace(/<[^>]*>?/gm, '');
+            const pubDateStr = item.querySelector("pubDate")?.textContent || "";
+            const link = item.querySelector("link")?.textContent || "#";
+            
+            let category = "Новости";
+            if (source.includes("rbc.ru")) category = "РБК";
+            else if (source.includes("kommersant.ru")) category = "Коммерсантъ";
+            else if (source.includes("lenta.ru")) category = "Lenta.ru";
 
-        // Берем все новости, если фильтрованных нет
-        const finalNews = filteredNews.length > 0 ? filteredNews : parsedNewsList;
+            allNews.push({
+              id: item.querySelector("guid")?.textContent || link || Math.random().toString(),
+              title,
+              link,
+              date: pubDateStr,
+              contentSnippet: cleanDescription,
+              category
+            });
+          });
+        } catch (e) {
+          console.error("Error fetching", source, e);
+        }
+      }));
 
-        setNewsData({ items: finalNews.slice(0, 10) });
-      }
+      // Сортировка по дате (самые свежие сверху)
+      allNews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // Фильтруем новости по финансовой теме
+      const currencyAndBankKeywords = [
+        'курс', 'валют', 'доллар', 'евро', 'рубл', 'юан', 
+        'банк', 'цб', 'центробанк', 'ставк', 'кредит', 'вклад',
+        'депозит', 'ипотек', 'свифт', 'swift', 'санкци', 'экономи', 'бизнес', 'финанс',
+        'акци', 'бирж', 'инфляц', 'ввп', 'минфин', 'налог'
+      ];
+
+      const filteredNews = allNews.filter((item) => {
+        const textToSearch = (item.title + " " + item.contentSnippet).toLowerCase();
+        // Lenta is already economics, keep them, filter the rest
+        return item.category === "Lenta.ru" || currencyAndBankKeywords.some(keyword => textToSearch.includes(keyword)); 
+      });
+
+      // Берем релевантные новости, либо любые последние, если отфильтрованных мало
+      const finalNews = filteredNews.length >= 6 ? filteredNews : allNews;
+
+      setNewsData({ items: finalNews.slice(0, 10).map(n => ({...n, id: n.id || Math.random().toString()})) });
       
     } catch (error) {
       console.error("Failed to fetch data:", error);
