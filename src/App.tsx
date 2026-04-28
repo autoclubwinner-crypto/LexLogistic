@@ -17,6 +17,7 @@ interface Rate {
 interface RatesData {
   date: string;
   rates: Rate[];
+  lastChecked?: string;
 }
 
 interface NewsItem {
@@ -40,16 +41,15 @@ export default function App() {
   const fetchAllData = async () => {
     setIsLoading(true);
     try {
-      // Используем бесплатный CORS-прокси для обхода защиты серверов (чтобы сайт мог работать как простой HTML без бекенда)
+      const timestamp = new Date().getTime();
       
       // 1. Загрузка курсов валют через открытый API, который не блокирует CORS
-      const ratesRes = await fetch("https://www.cbr-xml-daily.ru/daily_json.js").catch(() => null);
+      const ratesRes = await fetch(`https://www.cbr-xml-daily.ru/daily_json.js?_cb=${timestamp}`).catch(() => null);
       if (ratesRes && ratesRes.ok) {
         const data = await ratesRes.json();
         
         const dateStr = new Date(data.Date).toLocaleDateString("ru-RU", {
-          day: '2-digit', month: '2-digit', year: 'numeric',
-          hour: '2-digit', minute: '2-digit'
+          day: '2-digit', month: '2-digit', year: 'numeric'
         });
         
         const targetCodes = ["USD", "EUR", "GEL"];
@@ -67,12 +67,17 @@ export default function App() {
           };
         });
         
-        setRatesData({ date: dateStr, rates });
+        setRatesData({ 
+          date: dateStr, 
+          rates,
+          lastChecked: new Date().toLocaleTimeString('ru-RU')
+        });
       }
 
       // 2. Загрузка новостей через rss2json для обхода CORS и трансформации в JSON
       const newsUrl = "https://www.vedomosti.ru/rss/news";
-      const rss2jsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(newsUrl)}`;
+      // Добавляем timestamp для сброса кэша rss2json
+      const rss2jsonUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(newsUrl)}&_cb=${timestamp}`;
       
       const newsRes = await fetch(rss2jsonUrl).catch(() => null);
       if (newsRes && newsRes.ok) {
@@ -82,7 +87,7 @@ export default function App() {
         const currencyAndBankKeywords = [
           'курс', 'валют', 'доллар', 'евро', 'рубл', 'юан', 
           'банк', 'цб', 'центробанк', 'ставк', 'кредит', 'вклад',
-          'депозит', 'ипотек', 'свифт', 'swift', 'санкци'
+          'депозит', 'ипотек', 'свифт', 'swift', 'санкци', 'экономи', 'бизнес', 'финанс'
         ];
         
         const parsedNewsList = items.map((item: any) => {
@@ -172,16 +177,24 @@ export default function App() {
           <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 sm:gap-4">
             <div>
               <span className="text-[10px] sm:text-[11px] font-bold text-emerald-500 uppercase tracking-widest block mb-2 sm:mb-3">
-                Live Rates
+                Official Rates
               </span>
               <div className="flex items-center gap-2 sm:gap-3">
                 <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">Курс валют ЦБ РФ</h2>
               </div>
+              <p className="mt-2 text-xs text-zinc-500 max-w-sm">
+                Официальный курс обновляется один раз в сутки (по рабочим дням ЦБ). Кнопка обновления запрашивает актуальный фикс на текущий момент.
+              </p>
             </div>
             {ratesData && (
-              <div className="text-[11px] sm:text-[13px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
-                Данные на: <span className="text-white font-medium ml-1">{ratesData.date}</span>
+              <div className="flex flex-col items-end gap-1">
+                <div className="text-[11px] sm:text-[13px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
+                  Курс на: <span className="text-white font-medium ml-1">{ratesData.date}</span>
+                </div>
+                {ratesData.lastChecked && (
+                   <div className="text-[10px] text-zinc-500 mr-2">Проверено: {ratesData.lastChecked}</div>
+                )}
               </div>
             )}
           </div>
