@@ -49,8 +49,7 @@ export default function App() {
     return 'auto';
   });
 
-  // Theme auto-location data state
-  const [sunData, setSunData] = useState<{sunrise: string, sunset: string} | null>(null);
+  // Theme tracking
 
   // Calculator state
   const [calcAmount, setCalcAmount] = useState<string>("1000");
@@ -76,11 +75,12 @@ export default function App() {
         const rapiraPlate = await ratesRes.json();
         if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
           const items = rapiraPlate.ask.items;
-          // Парсим курс биржевого стакана 5-я строка сверху вниз (index 7, если стакан 12 элементов)
-          if(items.length > 7) {
-            usdtRubRaw = parseFloat(items[7].price);
+          // Пользователь указал, что верхняя строка биржевого стакана соответствует 12-й позиции (индекс 11) в ответе API,
+          // так как биржа визуализирует 12 строк для заявок на продажу, где индекс 0 - это лучшая цена (нижняя строка), а индекс 11 - верхняя.
+          if (items.length > 11) {
+            usdtRubRaw = parseFloat(items[11].price);
           } else if (items.length > 0) {
-            usdtRubRaw = parseFloat(items[0].price);
+            usdtRubRaw = parseFloat(items[items.length - 1].price);
           }
         }
       }
@@ -255,73 +255,38 @@ export default function App() {
     localStorage.setItem('app-theme', themeMode);
     
     // Fetch sun data if 'auto' and not cached
-    if (themeMode === 'auto' && !sunData) {
-      const cached = localStorage.getItem('geoSunData');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          // cache for 24h
-          if (new Date().getTime() - parsed.timestamp < 1000 * 60 * 60 * 24) {
-            setSunData({ sunrise: parsed.sunrise, sunset: parsed.sunset });
-            return;
-          }
-        } catch(e) {}
-      }
+    if (themeMode === 'auto') {
+      // Испольуем простое локальное время устройства, это самый надежный и быстрый метод
+      // без ложных срабатываний из-за VPN или блокировщиков рекламы.
+      const hour = new Date().getHours();
+      const shouldBeDark = hour < 6 || hour >= 20;
       
-      let isMounted = true;
-      fetch('https://ipapi.co/json/')
-        .then(res => res.json())
-        .then(data => {
-          if (data.latitude && data.longitude) {
-             return fetch(`https://api.sunrise-sunset.org/json?lat=${data.latitude}&lng=${data.longitude}&formatted=0`);
-          }
-        })
-        .then(res => res?.json())
-        .then(data => {
-          if (!isMounted) return;
-          if (data?.results?.sunrise && data?.results?.sunset) {
-             const payload = { sunrise: data.results.sunrise, sunset: data.results.sunset };
-             setSunData(payload);
-             localStorage.setItem('geoSunData', JSON.stringify({
-               ...payload,
-               timestamp: new Date().getTime()
-             }));
-          }
-        }).catch(err => console.error("Could not fetch location/theme data", err));
-        
-      return () => { isMounted = false; };
+      if (shouldBeDark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
     }
-  }, [themeMode, sunData]);
+  }, [themeMode]);
 
   useEffect(() => {
     const applyTheme = () => {
+      let shouldBeDark = false;
       if (themeMode === 'light') {
-        document.documentElement.classList.remove('dark');
+        shouldBeDark = false;
       } else if (themeMode === 'dark') {
-        document.documentElement.classList.add('dark');
+        shouldBeDark = true;
       } else {
-        // Auto
-        if (sunData) {
-           const now = new Date();
-           const sunrise = new Date(sunData.sunrise);
-           const sunset = new Date(sunData.sunset);
-           const isDarkNow = now < sunrise || now > sunset;
-           if (isDarkNow) document.documentElement.classList.add('dark');
-           else document.documentElement.classList.remove('dark');
-        } else {
-           // Fallback simple time logic before location loads or if fails
-           const hour = new Date().getHours();
-           const fallbackIsDark = hour < 6 || hour >= 20;
-           if (fallbackIsDark) document.documentElement.classList.add('dark');
-           else document.documentElement.classList.remove('dark');
-        }
+        // Auto: простое локальное время
+        const hour = new Date().getHours();
+        shouldBeDark = hour < 6 || hour >= 20;
       }
+      
+      if (shouldBeDark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
     };
     
     applyTheme();
     const interval = setInterval(applyTheme, 60000);
     return () => clearInterval(interval);
-  }, [themeMode, sunData]);
+  }, [themeMode]);
 
   const formatDate = (dateString: string) => {
     const d = new Date(dateString);
@@ -351,9 +316,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-[#fafafa] flex flex-col font-sans">
+    <div className="min-h-screen bg-[#f7f8f9] dark:bg-zinc-950 text-slate-900 dark:text-[#fafafa] flex flex-col font-sans">
       {/* Header */}
-      <header className="border-b border-slate-200 dark:border-[#27272a] bg-slate-50 dark:bg-zinc-950 sticky top-0 z-50">
+      <header className="border-b border-slate-200 dark:border-[#27272a] bg-[#f7f8f9] dark:bg-zinc-950 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-5 py-3 sm:py-0 sm:h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-[14px] sm:text-[16px] font-semibold text-slate-500 dark:text-[#a1a1aa] flex items-center gap-2">
@@ -364,7 +329,7 @@ export default function App() {
           <div className="flex items-center gap-3 sm:gap-4">
             <button 
               onClick={fetchAllData}
-              className={`group relative flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-full border-[3px] sm:border-[4px] border-slate-200 dark:border-zinc-800 bg-slate-100 dark:bg-zinc-900 shadow-2xl flex items-center justify-center transition-all active:scale-95 touch-manipulation cursor-pointer ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
+              className={`group relative flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-full border-[3px] sm:border-[4px] border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl flex items-center justify-center transition-all active:scale-95 touch-manipulation cursor-pointer ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
               disabled={isLoading}
               title="Обновить"
             >
@@ -394,7 +359,7 @@ export default function App() {
             </div>
             {ratesData && (
               <div className="flex flex-col items-end gap-1">
-                <div className="text-[11px] sm:text-[13px] text-slate-600 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
+                <div className="text-[11px] sm:text-[13px] text-slate-600 dark:text-zinc-400 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
                   Данные на: <span className="text-slate-900 dark:text-white font-medium ml-1">{ratesData.date}</span>
                 </div>
                 {ratesData.lastChecked && (
@@ -481,7 +446,7 @@ export default function App() {
             <div className="md:col-span-5 flex flex-col gap-4 relative z-10">
               <div className="flex flex-col gap-2">
                 <label className="text-[12px] font-medium text-slate-600 dark:text-zinc-400">Направление перевода</label>
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl">
+                <div className="grid grid-cols-2 gap-2 p-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl">
                   {["RUB/USD SWIFT", "RUB/EURO SWIFT"].map((opt) => (
                     <button
                       key={opt}
@@ -489,7 +454,7 @@ export default function App() {
                       className={`text-[12px] sm:text-[13px] font-medium px-3 py-2 rounded-lg transition-all ${
                         calcCurrency === opt 
                           ? 'bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-white shadow-md' 
-                          : 'text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:text-zinc-300 hover:bg-white/60 dark:bg-slate-200 dark:bg-zinc-800/50'
+                          : 'text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:text-zinc-300 hover:bg-white/60 dark:bg-zinc-800/50'
                       }`}
                     >
                       {opt.replace('RUB/', '').replace(' SWIFT', '')}
@@ -505,7 +470,7 @@ export default function App() {
                     type="number"
                     value={calcAmount}
                     onChange={(e) => setCalcAmount(e.target.value)}
-                    className="w-full bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl px-4 py-3 sm:py-4 text-xl sm:text-2xl font-bold text-slate-900 dark:text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
+                    className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl px-4 py-3 sm:py-4 text-xl sm:text-2xl font-bold text-slate-900 dark:text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
                     placeholder="1000"
                   />
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-500 font-bold uppercase tracking-wider">
@@ -516,7 +481,7 @@ export default function App() {
             </div>
 
             {/* Results Area */}
-            <div className="md:col-span-7 md:pl-6 md:border-l border-slate-200 dark:border-slate-200 dark:border-zinc-800/50 flex flex-col justify-center min-h-[160px]">
+            <div className="md:col-span-7 md:pl-6 md:border-l border-slate-200 dark:border-zinc-800/50 flex flex-col justify-center min-h-[160px]">
               <div className="space-y-4">
                 
                 <div className="flex flex-col gap-1">
@@ -530,7 +495,7 @@ export default function App() {
                 </div>
 
                 {ratesData && (
-                  <div className="flex items-center gap-4 text-[11px] sm:text-[12px] text-slate-500 dark:text-zinc-500 bg-slate-100 dark:bg-slate-100/80 dark:bg-zinc-900/50 inline-flex px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-200 dark:border-zinc-800/50">
+                  <div className="flex items-center gap-4 text-[11px] sm:text-[12px] text-slate-500 dark:text-zinc-500 bg-white dark:bg-zinc-900/50 inline-flex px-4 py-2 rounded-lg border border-slate-200 dark:border-zinc-800/50">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-slate-400 dark:text-zinc-600">Курс валюты</span>
                       <span className="font-medium text-slate-600 dark:text-zinc-400">
@@ -570,7 +535,7 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {isLoading && !newsData ? (
               [1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-32 bg-slate-100 dark:bg-slate-100/80 dark:bg-zinc-900/50 border border-slate-200 dark:border-slate-200 dark:border-zinc-800/80 rounded-2xl animate-pulse" />
+                <div key={i} className="h-32 bg-white dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800/80 rounded-2xl animate-pulse" />
               ))
             ) : (
               newsData?.items.map((news) => (
@@ -579,11 +544,11 @@ export default function App() {
                   href={news.link} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="group relative bg-white dark:bg-[#0d0d0f] hover:bg-slate-50 dark:hover:bg-[#131316] border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:border-zinc-700/80 rounded-2xl p-4 sm:p-5 transition-all outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 overflow-hidden flex flex-col justify-between min-h-[130px] sm:min-h-[140px] touch-manipulation"
+                  className="group relative bg-white dark:bg-[#0d0d0f] hover:bg-[#f7f8f9] dark:hover:bg-[#131316] border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:border-zinc-700/80 rounded-2xl p-4 sm:p-5 transition-all outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 overflow-hidden flex flex-col justify-between min-h-[130px] sm:min-h-[140px] touch-manipulation"
                 >
                   <div className="flex flex-col gap-2 sm:gap-3">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 bg-white/60 dark:bg-slate-200 dark:bg-zinc-800/50 px-2 py-0.5 sm:py-1 rounded">
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 bg-white/60 dark:bg-zinc-800/50 px-2 py-0.5 sm:py-1 rounded">
                         {news.category}
                       </span>
                       <span className="text-[10px] sm:text-[11px] text-slate-500 dark:text-zinc-500 font-medium">
@@ -610,7 +575,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 dark:border-[#27272a] bg-slate-50 dark:bg-zinc-950 mt-auto">
+      <footer className="border-t border-slate-200 dark:border-[#27272a] bg-[#f7f8f9] dark:bg-zinc-950 mt-auto">
         <div className="max-w-5xl mx-auto px-4 sm:px-5 py-6 sm:py-8 flex flex-col md:flex-row items-center justify-between gap-6 sm:gap-4 text-[11px] sm:text-[12px] text-slate-500 dark:text-[#a1a1aa]">
           <p className="text-center md:text-left">© {new Date().getFullYear()} Rus-exchange. Live market data aggregator.</p>
           
