@@ -64,8 +64,39 @@ export default function App() {
       let usdtRubRaw = 0;
       let xeEur = 0;
 
-      const ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
-      if (ratesRes && ratesRes.ok) {
+      let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
+      if (!ratesRes || !ratesRes.ok) {
+        // Fallback to proxy if backend is unavailable (e.g. static hosting)
+        console.warn("Backend unavailable, falling back to public CORS proxies...");
+        const mapiraUrl = `https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB`;
+        const xeUrl = `https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=EUR`;
+        
+        const [proxyMapira, proxyXe] = await Promise.allSettled([
+           fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(mapiraUrl)}&_nocache=${timestamp}`).then(r => r.json()),
+           fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(xeUrl)}&_nocache=${timestamp}`).then(r => r.text())
+        ]);
+        
+        if (proxyMapira.status === 'fulfilled' && proxyMapira.value?.contents) {
+           try {
+               const parsedMapira = JSON.parse(proxyMapira.value.contents);
+               if (parsedMapira?.ask?.items) {
+                   const items = parsedMapira.ask.items;
+                   if (items.length > 11) usdtRubRaw = parseFloat(items[11].price);
+                   else if (items.length > 0) usdtRubRaw = parseFloat(items[items.length - 1].price);
+               }
+           } catch(e) { console.error("Error parsing allorigins mapira", e); }
+        }
+        
+        if (proxyXe.status === 'fulfilled' && typeof proxyXe.value === 'string') {
+           const match = proxyXe.value.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+           if (match) {
+             try {
+               const data = JSON.parse(match[1]);
+               xeEur = data.props.pageProps.initialRatesData.rates.EUR;
+             } catch (e) { console.error("XE parsing error via proxy"); }
+           }
+        }
+      } else {
           const ratesData = await ratesRes.json();
           usdtRubRaw = ratesData.usdtRubRaw;
           xeEur = ratesData.xeEur;
@@ -146,44 +177,63 @@ export default function App() {
       const allNews: NewsItem[] = [];
 
       try {
-          const newsRes = await fetch(`/api/news?_t=${timestamp}`);
-          if (newsRes.ok) {
-              const newsDataMap = await newsRes.json();
-              
-              Object.entries(newsDataMap).forEach(([source, text]) => {
-                  if (!text || typeof text !== 'string') return;
-                  if (text.includes("429 Too Many") || text.includes("<html")) return;
-                  
+          const rssSources = [
+            "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
+            "https://www.kommersant.ru/RSS/news.xml",
+            "https://lenta.ru/rss/news/economics"
+          ];
+      
+          let newsRes = await fetch(`/api/news?_t=${timestamp}`).catch(() => null);
+          let newsDataMap: Record<string, any> = {};
+          
+          if (!newsRes || !newsRes.ok) {
+              console.warn("Backend unavailable for news, falling back to public CORS proxy...");
+              await Promise.allSettled(rssSources.map(async (source) => {
                   try {
-                      const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
-                      const items = Array.from(xmlDoc.querySelectorAll("item"));
-                      
-                      items.forEach(item => {
-                        const title = item.querySelector("title")?.textContent || "";
-                        const description = item.querySelector("description")?.textContent || "";
-                        const cleanDescription = description.replace(/<[^>]*>?/gm, '');
-                        const pubDateStr = item.querySelector("pubDate")?.textContent || "";
-                        const link = item.querySelector("link")?.textContent || "#";
-                        
-                        let category = "Новости";
-                        if (source.includes("rbc.ru")) category = "РБК";
-                        else if (source.includes("kommersant.ru")) category = "Коммерсантъ";
-                        else if (source.includes("lenta.ru")) category = "Lenta.ru";
-
-                        allNews.push({
-                          id: item.querySelector("guid")?.textContent || link || Math.random().toString(),
-                          title,
-                          link,
-                          date: pubDateStr,
-                          contentSnippet: cleanDescription,
-                          category
-                        });
-                      });
-                  } catch(e) {
-                      console.error("Error parsing source", source, e);
-                  }
-              });
+                      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(source)}&_nocache=${timestamp}`;
+                      const res = await fetch(proxyUrl);
+                      if (res.ok) {
+                          newsDataMap[source] = await res.text();
+                      }
+                  } catch (e) { console.error("Error fetching proxy news for", source); }
+              }));
+          } else {
+              newsDataMap = await newsRes.json();
           }
+          
+          Object.entries(newsDataMap).forEach(([source, text]) => {
+              if (!text || typeof text !== 'string') return;
+              if (text.includes("429 Too Many") || text.includes("<html")) return;
+              
+              try {
+                  const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+                  const items = Array.from(xmlDoc.querySelectorAll("item"));
+                  
+                  items.forEach(item => {
+                    const title = item.querySelector("title")?.textContent || "";
+                    const description = item.querySelector("description")?.textContent || "";
+                    const cleanDescription = description.replace(/<[^>]*>?/gm, '');
+                    const pubDateStr = item.querySelector("pubDate")?.textContent || "";
+                    const link = item.querySelector("link")?.textContent || "#";
+                    
+                    let category = "Новости";
+                    if (source.includes("rbc.ru")) category = "РБК";
+                    else if (source.includes("kommersant.ru")) category = "Коммерсантъ";
+                    else if (source.includes("lenta.ru")) category = "Lenta.ru";
+
+                    allNews.push({
+                      id: item.querySelector("guid")?.textContent || link || Math.random().toString(),
+                      title,
+                      link,
+                      date: pubDateStr,
+                      contentSnippet: cleanDescription,
+                      category
+                    });
+                  });
+              } catch(e) {
+                  console.error("Error parsing source", source, e);
+              }
+          });
       } catch (e) {
           console.error("Failed fetching news", e);
       }
