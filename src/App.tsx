@@ -60,42 +60,15 @@ export default function App() {
     try {
       const timestamp = new Date().getTime();
       
-      // 1. Загрузка курсов с криптобиржи Rapira
-      const mapiraUrl = `https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB`;
-      const ratesRes = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(mapiraUrl)}&_nocache=${timestamp}`).catch(() => null);
-      
-      // 2. Fetch XE for Cross Rate USD/EUR
-      const xeUrl = `https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=EUR`;
-      const xeRes = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(xeUrl)}&_nocache=${timestamp}`).catch(() => null);
-
+      // 1. Загрузка курсов (теперь через собственный backend для обхода CORS и анти-ботов)
       let usdtRubRaw = 0;
       let xeEur = 0;
 
+      const ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
       if (ratesRes && ratesRes.ok) {
-        const rapiraPlate = await ratesRes.json();
-        if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
-          const items = rapiraPlate.ask.items;
-          // Пользователь указал, что верхняя строка биржевого стакана соответствует 12-й позиции (индекс 11) в ответе API,
-          // так как биржа визуализирует 12 строк для заявок на продажу, где индекс 0 - это лучшая цена (нижняя строка), а индекс 11 - верхняя.
-          if (items.length > 11) {
-            usdtRubRaw = parseFloat(items[11].price);
-          } else if (items.length > 0) {
-            usdtRubRaw = parseFloat(items[items.length - 1].price);
-          }
-        }
-      }
-
-      if (xeRes && xeRes.ok) {
-        const text = await xeRes.text();
-        const match = text.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
-        if (match) {
-          try {
-            const data = JSON.parse(match[1]);
-            xeEur = data.props.pageProps.initialRatesData.rates.EUR;
-          } catch (e) {
-            console.error("Failed to parse XE data", e);
-          }
-        }
+          const ratesData = await ratesRes.json();
+          usdtRubRaw = ratesData.usdtRubRaw;
+          xeEur = ratesData.xeEur;
       }
 
       // Calculations according to business rules:
@@ -169,52 +142,51 @@ export default function App() {
         lastChecked: new Date().toLocaleTimeString('ru-RU')
       });
 
-      // 3. Загрузка новостей (RSS)
-      const rssSources = [
-        "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
-        "https://www.kommersant.ru/RSS/news.xml",
-        "https://lenta.ru/rss/news/economics"
-      ];
-
+      // 3. Загрузка новостей (RSS) через локальный proxy
       const allNews: NewsItem[] = [];
 
-      await Promise.allSettled(rssSources.map(async (source) => {
-        try {
-          const url = `https://api.codetabs.com/v1/proxy?quest=${source}&_nocache=${timestamp}`;
-          const res = await fetch(url);
-          if (!res.ok) return;
-          
-          const text = await res.text();
-          if (text.includes("429 Too Many") || text.includes("<html")) return;
+      try {
+          const newsRes = await fetch(`/api/news?_t=${timestamp}`);
+          if (newsRes.ok) {
+              const newsDataMap = await newsRes.json();
+              
+              Object.entries(newsDataMap).forEach(([source, text]) => {
+                  if (!text || typeof text !== 'string') return;
+                  if (text.includes("429 Too Many") || text.includes("<html")) return;
+                  
+                  try {
+                      const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+                      const items = Array.from(xmlDoc.querySelectorAll("item"));
+                      
+                      items.forEach(item => {
+                        const title = item.querySelector("title")?.textContent || "";
+                        const description = item.querySelector("description")?.textContent || "";
+                        const cleanDescription = description.replace(/<[^>]*>?/gm, '');
+                        const pubDateStr = item.querySelector("pubDate")?.textContent || "";
+                        const link = item.querySelector("link")?.textContent || "#";
+                        
+                        let category = "Новости";
+                        if (source.includes("rbc.ru")) category = "РБК";
+                        else if (source.includes("kommersant.ru")) category = "Коммерсантъ";
+                        else if (source.includes("lenta.ru")) category = "Lenta.ru";
 
-          const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
-          const items = Array.from(xmlDoc.querySelectorAll("item"));
-          
-          items.forEach(item => {
-            const title = item.querySelector("title")?.textContent || "";
-            const description = item.querySelector("description")?.textContent || "";
-            const cleanDescription = description.replace(/<[^>]*>?/gm, '');
-            const pubDateStr = item.querySelector("pubDate")?.textContent || "";
-            const link = item.querySelector("link")?.textContent || "#";
-            
-            let category = "Новости";
-            if (source.includes("rbc.ru")) category = "РБК";
-            else if (source.includes("kommersant.ru")) category = "Коммерсантъ";
-            else if (source.includes("lenta.ru")) category = "Lenta.ru";
-
-            allNews.push({
-              id: item.querySelector("guid")?.textContent || link || Math.random().toString(),
-              title,
-              link,
-              date: pubDateStr,
-              contentSnippet: cleanDescription,
-              category
-            });
-          });
-        } catch (e) {
-          console.error("Error fetching", source, e);
-        }
-      }));
+                        allNews.push({
+                          id: item.querySelector("guid")?.textContent || link || Math.random().toString(),
+                          title,
+                          link,
+                          date: pubDateStr,
+                          contentSnippet: cleanDescription,
+                          category
+                        });
+                      });
+                  } catch(e) {
+                      console.error("Error parsing source", source, e);
+                  }
+              });
+          }
+      } catch (e) {
+          console.error("Failed fetching news", e);
+      }
 
       // Сортировка по дате
       allNews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
