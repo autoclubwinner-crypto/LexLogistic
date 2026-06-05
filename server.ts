@@ -19,12 +19,7 @@ async function startServer() {
                 'Accept': 'application/json'
             }
         }),
-        fetch('https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=EUR', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'text/html,application/xhtml+xml,application/xml'
-            }
-        })
+        fetch('https://open.er-api.com/v6/latest/USD')
       ]);
 
       let usdtRubRaw = 0;
@@ -43,15 +38,13 @@ async function startServer() {
       }
 
       if (xeRes.status === 'fulfilled' && xeRes.value.ok) {
-        const text = await xeRes.value.text();
-        const match = text.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
-        if (match) {
-          try {
-            const data = JSON.parse(match[1]);
-            xeEur = data.props.pageProps.initialRatesData.rates.EUR;
-          } catch (e) {
-            console.error("Failed to parse XE data", e);
-          }
+        try {
+            const data = await xeRes.value.json() as any;
+            if (data?.rates?.EUR) {
+                xeEur = data.rates.EUR;
+            }
+        } catch(e) {
+            console.error("Parse er-api error", e);
         }
       }
       
