@@ -69,11 +69,10 @@ export default function App() {
         // Fallback to proxy if backend is unavailable (e.g. static hosting)
         console.warn("Backend unavailable, falling back to public CORS proxies...");
         const mapiraUrl = `https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB`;
-        const xeUrl = `https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=EUR`;
         
         const [proxyMapira, proxyXe] = await Promise.allSettled([
            fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(mapiraUrl)}&_nocache=${timestamp}`).then(r => r.json()),
-           fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(xeUrl)}&_nocache=${timestamp}`).then(r => r.text())
+           fetch(`https://open.er-api.com/v6/latest/USD?_nocache=${timestamp}`).then(r => r.json())
         ]);
         
         if (proxyMapira.status === 'fulfilled' && proxyMapira.value?.contents) {
@@ -87,14 +86,8 @@ export default function App() {
            } catch(e) { console.error("Error parsing allorigins mapira", e); }
         }
         
-        if (proxyXe.status === 'fulfilled' && typeof proxyXe.value === 'string') {
-           const match = proxyXe.value.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
-           if (match) {
-             try {
-               const data = JSON.parse(match[1]);
-               xeEur = data.props.pageProps.initialRatesData.rates.EUR;
-             } catch (e) { console.error("XE parsing error via proxy"); }
-           }
+        if (proxyXe.status === 'fulfilled' && proxyXe.value?.rates?.EUR) {
+           xeEur = proxyXe.value.rates.EUR;
         }
       } else {
           const ratesData = await ratesRes.json();
