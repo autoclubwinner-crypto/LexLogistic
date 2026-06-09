@@ -97,7 +97,7 @@ export default function App() {
 
       // Calculations according to business rules:
       const rubUsdt = usdtRubRaw;
-      const rubUsdTbilisi = usdtRubRaw * 1.016;
+      const rubUsdTbilisi = usdtRubRaw * 1.015;
       const rubUsdSwift = usdtRubRaw * 1.01;
       
       // Cross rate XE EUR to USD
