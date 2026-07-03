@@ -1,108 +1,46 @@
-import express from "express";
-import path from "path";
-import { createServer as createViteServer } from "vite";
-import cors from "cors";
+const fs = require('fs');
+let code = fs.readFileSync('src/App.tsx', 'utf-8');
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const replacements = [
+  ['bg-[#09090b]', 'bg-slate-50 dark:bg-zinc-950'],
+  ['text-[#fafafa]', 'text-slate-900 dark:text-[#fafafa]'],
+  ['border-[#27272a]', 'border-slate-200 dark:border-[#27272a]'],
+  ['text-[#a1a1aa]', 'text-slate-500 dark:text-[#a1a1aa]'],
+  ['bg-zinc-900', 'bg-slate-100 dark:bg-zinc-900'],
+  ['bg-zinc-950/50', 'bg-white/80 dark:bg-zinc-950/50'],
+  ['bg-zinc-900/50', 'bg-slate-100/80 dark:bg-zinc-900/50'],
+  ['bg-zinc-800/50', 'bg-white/60 dark:bg-zinc-800/50'],
+  ['bg-zinc-800', 'bg-slate-200 dark:bg-zinc-800'],
+  ['bg-[#0d0d0f]', 'bg-white dark:bg-[#0d0d0f]'],
+  ['hover:bg-[#131316]', 'hover:bg-slate-50 dark:hover:bg-[#131316]'],
+  ['border-zinc-800/80', 'border-slate-200 dark:border-zinc-800/80'],
+  ['border-zinc-800/50', 'border-slate-200 dark:border-zinc-800/50'],
+  ['border-zinc-800', 'border-slate-200 dark:border-zinc-800'],
+  ['border-zinc-700/80', 'border-slate-300 dark:border-zinc-700/80'],
+  ['border-white/10', 'border-black/5 dark:border-white/10'],
+  ['border-white/5', 'border-black/5 dark:border-white/5'],
+  ['text-zinc-500', 'text-slate-500 dark:text-zinc-500'],
+  ['text-zinc-600', 'text-slate-400 dark:text-zinc-600'],
+  ['text-zinc-400', 'text-slate-600 dark:text-zinc-400'],
+  ['text-zinc-300', 'text-slate-700 dark:text-zinc-300'],
+  ['text-zinc-100', 'text-slate-800 dark:text-zinc-100'],
+  ['text-white', 'text-slate-900 dark:text-white'],
+  ['bg-black/40', 'bg-white/80 dark:bg-black/40'],
+  ['from-zinc-900/80 to-zinc-950/80', 'from-slate-100 to-slate-200/50 dark:from-zinc-900/80 dark:to-zinc-950/80'],
+  ['from-zinc-800/80 to-zinc-900/80', 'from-white to-slate-100 dark:from-zinc-800/80 dark:to-zinc-900/80'],
+  ['shadow-[0_8px_30px_rgb(0,0,0,0.4)]', 'shadow-xl dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)]']
+];
 
-  app.use(cors());
-
-  // Proxy endpoint for rates (Rapira and XE)
-  app.get("/api/rates", async (req, res) => {
-    try {
-      const [rapiraRes, xeRes] = await Promise.allSettled([
-        fetch('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'application/json'
-            }
-        }),
-        fetch('https://open.er-api.com/v6/latest/USD')
-      ]);
-
-      let usdtRubRaw = 0;
-      let xeEur = 0;
-
-      if (rapiraRes.status === 'fulfilled' && rapiraRes.value.ok) {
-        const rapiraPlate = await rapiraRes.value.json() as any;
-        if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
-          const items = rapiraPlate.ask.items;
-          if (items.length > 11) {
-            usdtRubRaw = parseFloat(items[11].price);
-          } else if (items.length > 0) {
-            usdtRubRaw = parseFloat(items[items.length - 1].price);
-          }
-        }
-      }
-
-      if (xeRes.status === 'fulfilled' && xeRes.value.ok) {
-        try {
-            const data = await xeRes.value.json() as any;
-            if (data?.rates?.EUR) {
-                xeEur = data.rates.EUR;
-            }
-        } catch(e) {
-            console.error("Parse er-api error", e);
-        }
-      }
-      
-      res.json({ usdtRubRaw, xeEur });
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: "Failed to fetch rates" });
-    }
-  });
-
-  // Proxy endpoint for news RSS
-  app.get("/api/news", async (req, res) => {
-      const rssSources = [
-        "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
-        "https://www.kommersant.ru/RSS/news.xml",
-        "https://lenta.ru/rss/news/economics"
-      ];
-
-      const results = {};
-      
-      await Promise.allSettled(rssSources.map(async (source) => {
-          try {
-              const fetchRes = await fetch(source, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0'
-                }
-              });
-              if(fetchRes.ok) {
-                  results[source] = await fetchRes.text();
-              } else {
-                  results[source] = null;
-              }
-          } catch(e) {
-              results[source] = null;
-          }
-      }));
-
-      res.json(results);
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+for (const [find, replace] of replacements) {
+    code = code.split(find).join(replace);
 }
 
-startServer();
+// Revert text-slate-900 for the red update button and rate icons where we want text-white
+code = code.replace(/<span className="text-\[7px\] sm:text-\[8px\] font-black text-slate-900 dark:text-white uppercase tracking-wider leading-none select-none">Обновить<\/span>/g, '<span className="text-[7px] sm:text-[8px] font-black text-white uppercase tracking-wider leading-none select-none">Обновить</span>');
+code = code.replace(/text-slate-900 dark:text-white \${isLoading \? 'animate-spin'/g, "text-white ${isLoading ? 'animate-spin'");
+code = code.replace(/text-slate-900 dark:text-white drop-shadow-md/g, "text-slate-900 dark:text-white");
+// ensure specific instances look right
+code = code.replace(/text-slate-900 dark:text-white ml-1/g, 'text-slate-900 dark:text-white ml-1');
+
+fs.writeFileSync('src/App.tsx', code);
+console.log('Done');
