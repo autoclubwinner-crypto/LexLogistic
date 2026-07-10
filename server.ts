@@ -1,108 +1,20 @@
-import express from "express";
-import path from "path";
-import { createServer as createViteServer } from "vite";
-import cors from "cors";
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+# Run and deploy your AI Studio app
 
-  app.use(cors());
+This contains everything you need to run your app locally.
 
-  // Proxy endpoint for rates (Rapira and XE)
-  app.get("/api/rates", async (req, res) => {
-    try {
-      const [rapiraRes, xeRes] = await Promise.allSettled([
-        fetch('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'application/json'
-            }
-        }),
-        fetch('https://open.er-api.com/v6/latest/USD')
-      ]);
+View your app in AI Studio: https://ai.studio/apps/72f312be-390d-4416-af2a-2c2f6b1aa6e6
 
-      let usdtRubRaw = 0;
-      let xeEur = 0;
+## Run Locally
 
-      if (rapiraRes.status === 'fulfilled' && rapiraRes.value.ok) {
-        const rapiraPlate = await rapiraRes.value.json() as any;
-        if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
-          const items = rapiraPlate.ask.items;
-          if (items.length > 11) {
-            usdtRubRaw = parseFloat(items[11].price);
-          } else if (items.length > 0) {
-            usdtRubRaw = parseFloat(items[items.length - 1].price);
-          }
-        }
-      }
+**Prerequisites:**  Node.js
 
-      if (xeRes.status === 'fulfilled' && xeRes.value.ok) {
-        try {
-            const data = await xeRes.value.json() as any;
-            if (data?.rates?.EUR) {
-                xeEur = data.rates.EUR;
-            }
-        } catch(e) {
-            console.error("Parse er-api error", e);
-        }
-      }
-      
-      res.json({ usdtRubRaw, xeEur });
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: "Failed to fetch rates" });
-    }
-  });
 
-  // Proxy endpoint for news RSS
-  app.get("/api/news", async (req, res) => {
-      const rssSources = [
-        "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
-        "https://www.kommersant.ru/RSS/news.xml",
-        "https://lenta.ru/rss/news/economics"
-      ];
-
-      const results = {};
-      
-      await Promise.allSettled(rssSources.map(async (source) => {
-          try {
-              const fetchRes = await fetch(source, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0'
-                }
-              });
-              if(fetchRes.ok) {
-                  results[source] = await fetchRes.text();
-              } else {
-                  results[source] = null;
-              }
-          } catch(e) {
-              results[source] = null;
-          }
-      }));
-
-      res.json(results);
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

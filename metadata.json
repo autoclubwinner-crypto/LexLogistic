@@ -1,6 +1,8 @@
-{
-  "name": "Rus-exchange",
-  "description": "Актуальный курс рубля (RUB) к USD, EUR, GEL и финансовые новости. Минималистичный дашборд.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
