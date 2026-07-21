@@ -82,19 +82,10 @@ app.get("/api/news", async (req, res) => {
 });
 
 if (process.env.NODE_ENV !== "production") {
-    const PORT = process.env.PORT || 3000;
-    import("vite").then(async ({ createServer: createViteServer }) => {
-        const vite = await createViteServer({
-            server: { middlewareMode: true },
-            appType: "spa",
-        });
-        app.use(vite.middlewares);
-        
-        app.listen(PORT, () => {
-            console.log(`Development server running on http://localhost:${PORT}`);
-        });
-    }).catch(err => {
-        console.error("Failed to load Vite", err);
+    // В локальной среде запускаем бэкенд на порту 3001
+    const PORT = 3001;
+    app.listen(PORT, () => {
+        console.log(`Development backend server running on http://localhost:${PORT}`);
     });
 }
 
