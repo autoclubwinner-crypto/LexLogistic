@@ -86,8 +86,13 @@ export default function App() {
            } catch(e) { console.error("Error parsing allorigins mapira", e); }
         }
         
-        if (proxyXe.status === 'fulfilled' && proxyXe.value?.rates?.EUR) {
-           xeEur = proxyXe.value.rates.EUR;
+        if (proxyXe.status === 'fulfilled') {
+          if (proxyXe.value?.rates?.EUR) {
+             xeEur = proxyXe.value.rates.EUR;
+          }
+          if (usdtRubRaw === 0 && proxyXe.value?.rates?.RUB) {
+             usdtRubRaw = proxyXe.value.rates.RUB * 1.052;
+          }
         }
       } else {
           const ratesData = await ratesRes.json();
