@@ -2,6 +2,14 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/api/rates",
+      "destination": "/api/rates"
+    },
+    {
+      "source": "/api/news",
+      "destination": "/api/news"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api"
     },
