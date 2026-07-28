@@ -10,6 +10,7 @@ app.get("/api/rates", async (req, res) => {
   try {
     const [rapiraRes, xeRes] = await Promise.allSettled([
       fetch('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {
+          method: 'POST',
           headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
               'Accept': 'application/json'
