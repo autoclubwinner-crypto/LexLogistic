@@ -4,7 +4,8 @@
  */
 
 import { Activity, RefreshCcw, TrendingUp, Newspaper, ExternalLink, Calculator as CalcIcon, Sun, Moon, Monitor } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { AdminPanel, AdminSettings } from "./components/AdminPanel";
 
 interface Rate {
   id: string;
@@ -20,6 +21,7 @@ interface RatesData {
   date: string;
   rates: Rate[];
   lastChecked?: string;
+  isStale?: boolean;
 }
 
 interface NewsItem {
@@ -41,6 +43,52 @@ export default function App() {
   const [ratesData, setRatesData] = useState<RatesData | null>(null);
   const [newsData, setNewsData] = useState<NewsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [adminClicks, setAdminClicks] = useState(0);
+
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => {
+    const saved = localStorage.getItem('adminSettings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          usdtTblPercent: parsed.usdtTblPercent ?? (parsed.usdtTblOffset ? Number(((parsed.usdtTblOffset - 1) * 100).toFixed(4)) : 1.3),
+          usdtSwiftPercent: parsed.usdtSwiftPercent ?? (parsed.usdtSwiftOffset ? Number(((parsed.usdtSwiftOffset - 1) * 100).toFixed(4)) : 1.0),
+          eurUsdCrossPercent: parsed.eurUsdCrossPercent ?? (parsed.eurUsdCrossMultiplier ? Number(((parsed.eurUsdCrossMultiplier - 1) * 100).toFixed(4)) : 0.3),
+          eurUsdCrossAdd: parsed.eurUsdCrossAdd ?? 0.002,
+          usdtBaseOverride: parsed.usdtBaseOverride || '',
+          eurBaseOverride: parsed.eurBaseOverride || ''
+        };
+      } catch (e) {}
+    }
+    return {
+      usdtTblPercent: 1.3,
+      usdtSwiftPercent: 1.0,
+      eurUsdCrossPercent: 0.3,
+      eurUsdCrossAdd: 0.002,
+      usdtBaseOverride: '',
+      eurBaseOverride: ''
+    };
+  });
+  
+  const handleAdminTitleClick = () => {
+    setAdminClicks(prev => {
+      const newClicks = prev + 1;
+      if (newClicks >= 5) {
+        setShowAdmin(true);
+        return 0;
+      }
+      return newClicks;
+    });
+    setTimeout(() => setAdminClicks(0), 3000); // reset after 3 sec
+  };
+
+  const adminSettingsRef = useRef(adminSettings);
+  useEffect(() => {
+    adminSettingsRef.current = adminSettings;
+    localStorage.setItem('adminSettings', JSON.stringify(adminSettings));
+    fetchAllData(); // Re-fetch when admin settings change
+  }, [adminSettings]);
   
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
@@ -63,37 +111,70 @@ export default function App() {
       // 1. Загрузка курсов (теперь через собственный backend для обхода CORS и анти-ботов)
       let usdtRubRaw = 0;
       let xeEur = 0;
+      let fetchSuccess = false;
+      let isStale = false;
+      let lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
       let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
       if (ratesRes && ratesRes.ok) {
         try {
           const text = await ratesRes.text();
           const ratesData = JSON.parse(text);
-          usdtRubRaw = ratesData.usdtRubRaw || 95.50;
-          xeEur = ratesData.xeEur || 0.92;
+          usdtRubRaw = ratesData.usdtRubRaw || 0;
+          xeEur = ratesData.xeEur || 0;
+          fetchSuccess = ratesData.success === true;
         } catch (e) {
-          console.error("API вернул не JSON. Включаем хардкод-фоллбэк", e);
-          usdtRubRaw = 95.50;
-          xeEur = 0.92;
+          console.error("API вернул не JSON. Включаем кеш-фоллбэк", e);
         }
       } else {
-          console.error("Backend rates fetch failed. Включаем хардкод-фоллбэк");
-          usdtRubRaw = 95.50;
-          xeEur = 0.92;
+          console.error("Backend rates fetch failed. Включаем кеш-фоллбэк");
+      }
+
+      if (fetchSuccess && usdtRubRaw > 0 && xeEur > 0) {
+          localStorage.setItem('cachedRates', JSON.stringify({ usdtRubRaw, xeEur }));
+          localStorage.setItem('cachedRatesTime', Date.now().toString());
+          isStale = false;
+      } else {
+          const cachedRatesStr = localStorage.getItem('cachedRates');
+          const cachedTimeStr = localStorage.getItem('cachedRatesTime');
+          if (cachedRatesStr && cachedTimeStr) {
+              const cachedRates = JSON.parse(cachedRatesStr);
+              usdtRubRaw = cachedRates.usdtRubRaw;
+              xeEur = cachedRates.xeEur;
+              lastCheckedTime = new Date(parseInt(cachedTimeStr, 10)).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+              isStale = true;
+          } else {
+              usdtRubRaw = 95.50;
+              xeEur = 0.92;
+              isStale = true;
+          }
       }
 
       // Calculations according to business rules:
+      const currentSettings = adminSettingsRef.current;
+      
+      // Overrides
+      if (currentSettings.usdtBaseOverride && !isNaN(parseFloat(currentSettings.usdtBaseOverride))) {
+        usdtRubRaw = parseFloat(currentSettings.usdtBaseOverride);
+        isStale = false; // Manually forced value is always fresh
+      }
+      if (currentSettings.eurBaseOverride && !isNaN(parseFloat(currentSettings.eurBaseOverride))) {
+        xeEur = parseFloat(currentSettings.eurBaseOverride);
+        isStale = false;
+      }
+
       const rubUsdt = usdtRubRaw;
-      const rubUsdTbilisi = usdtRubRaw * 1.013;
-      const rubUsdSwift = usdtRubRaw * 1.01;
+      const rubUsdTbilisi = usdtRubRaw * (1 + (currentSettings.usdtTblPercent ?? 1.3) / 100);
+      const rubUsdSwift = usdtRubRaw * (1 + (currentSettings.usdtSwiftPercent ?? 1.0) / 100);
       
       // Cross rate XE EUR to USD
       // XE gives 1 USD = xeEur EUR (e.g. 0.92)
       // Standard cross rate EUR/USD is 1 / xeEur (e.g. 1.08)
       const eurUsdBase = xeEur ? (1 / xeEur) : 1.08;
       
-      // "Кросс курс USD/EUR с сайта xe.com парсить со значением на 0.3 процента больше"
-      // "а также автоматически добавлять к нему + 0,002"
-      const crossUsdEur = (eurUsdBase * 1.003) + 0.002;
+      // "Кросс курс USD/EUR с сайта xe.com парсить со значением на X процента больше"
+      // "а также автоматически добавлять к нему + Y"
+      const crossUsdEur = (eurUsdBase * (1 + (currentSettings.eurUsdCrossPercent ?? 0.3) / 100)) + (currentSettings.eurUsdCrossAdd ?? 0.002);
       
       // RUB/EURO SWIFT = RUB/USD SWIFT * CROSS EUR/USD
       const rubEuroSwift = rubUsdSwift * crossUsdEur;
@@ -149,7 +230,8 @@ export default function App() {
       setRatesData({ 
         date: dateStr, 
         rates,
-        lastChecked: new Date().toLocaleTimeString('ru-RU')
+        lastChecked: lastCheckedTime,
+        isStale: isStale
       });
 
       // 3. Загрузка новостей (RSS) через локальный proxy
@@ -322,7 +404,10 @@ export default function App() {
       <header className="border-b border-slate-200 dark:border-[#27272a] bg-[#f7f8f9] dark:bg-zinc-950 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-5 py-3 sm:py-0 sm:h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h1 className="text-[14px] sm:text-[16px] font-semibold text-slate-500 dark:text-[#a1a1aa] flex items-center gap-2">
+            <h1 
+              onClick={handleAdminTitleClick}
+              className="text-[14px] sm:text-[16px] font-semibold text-slate-500 dark:text-[#a1a1aa] flex items-center gap-2 cursor-pointer select-none"
+            >
               <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-slate-900 dark:text-[#fafafa]" />
               RUS-EXCHANGE
             </h1>
@@ -364,7 +449,9 @@ export default function App() {
                   Данные на: <span className="text-slate-900 dark:text-white font-medium ml-1">{ratesData.date}</span>
                 </div>
                 {ratesData.lastChecked && (
-                   <div className="text-[10px] text-slate-500 dark:text-zinc-500 mr-2">Проверено: {ratesData.lastChecked}</div>
+                   <div className={`text-[10px] mr-2 ${ratesData.isStale ? 'text-red-500 font-bold' : 'text-slate-500 dark:text-zinc-500'}`}>
+                     {ratesData.isStale ? 'Устарело (Кеш): ' : 'Проверено: '}{ratesData.lastChecked}
+                   </div>
                 )}
               </div>
             )}
@@ -611,6 +698,17 @@ export default function App() {
           </div>
         </div>
       </footer>
+      
+      {showAdmin && (
+        <AdminPanel
+          settings={adminSettings}
+          onSave={(newSettings) => {
+            setAdminSettings(newSettings);
+            setShowAdmin(false);
+          }}
+          onClose={() => setShowAdmin(false)}
+        />
+      )}
     </div>
   );
 }
