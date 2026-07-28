@@ -1,46 +1,60 @@
 import express from "express";
 import cors from "cors";
+import axios from "axios";
 
 const app = express();
-
 app.use(cors());
 
 // Proxy endpoint for rates (Rapira and XE)
 app.get("/api/rates", async (req, res) => {
   try {
-    const [rapiraRes, xeRes] = await Promise.allSettled([
-      fetch('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {
-          method: 'POST',
+    let rapiraRes: any = null;
+    let xeRes: any = null;
+    
+    await Promise.allSettled([
+      axios.post('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {}, {
           headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'application/json',
+              'Accept': 'application/json, text/plain, */*',
               'Origin': 'https://rapira.net',
-              'Referer': 'https://rapira.net/'
-          }
-      }),
-      fetch('https://open.er-api.com/v6/latest/USD')
+              'Referer': 'https://rapira.net/',
+              'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+          },
+          timeout: 8000
+      }).then(r => rapiraRes = r).catch(e => { console.error("Rapira axios error", e.message); }),
+      
+      axios.get('https://open.er-api.com/v6/latest/USD', { timeout: 8000 })
+        .then(r => xeRes = r).catch(e => { console.error("XE axios error", e.message); })
     ]);
 
     let usdtRubRaw = 0;
     let xeEur = 0;
 
-    if (rapiraRes.status === 'fulfilled' && rapiraRes.value.ok) {
-      const rapiraPlate = await rapiraRes.value.json() as any;
-      if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
-        const items = rapiraPlate.ask.items;
-        if (items.length > 11) {
-          usdtRubRaw = parseFloat(items[11].price);
-        } else if (items.length > 0) {
-          usdtRubRaw = parseFloat(items[items.length - 1].price);
+    if (rapiraRes && rapiraRes.status === 200) {
+      try {
+        const rapiraPlate = rapiraRes.data;
+        if(rapiraPlate?.ask?.items && Array.isArray(rapiraPlate.ask.items)) {
+          const items = rapiraPlate.ask.items;
+          if (items.length > 11) {
+            usdtRubRaw = parseFloat(items[11].price);
+          } else if (items.length > 0) {
+            usdtRubRaw = parseFloat(items[items.length - 1].price);
+          }
         }
+      } catch (err) {
+        console.error("Rapira data parse error:", err);
       }
     }
 
-    if (xeRes.status === 'fulfilled' && xeRes.value.ok) {
+    if (xeRes && xeRes.status === 200) {
       try {
-          const data = await xeRes.value.json() as any;
+          const data = xeRes.data;
           if (data?.rates?.EUR) {
               xeEur = data.rates.EUR;
+          }
+          if (usdtRubRaw === 0 && data?.rates?.RUB) {
+              // Fallback if Rapira is blocked by Cloudflare on Vercel
+              usdtRubRaw = data.rates.RUB * 1.052; 
           }
       } catch(e) {
           console.error("Parse er-api error", e);
