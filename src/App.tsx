@@ -63,41 +63,13 @@ export default function App() {
       // 1. Загрузка курсов (теперь через собственный backend для обхода CORS и анти-ботов)
       let usdtRubRaw = 0;
       let xeEur = 0;
-
       let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
-      if (!ratesRes || !ratesRes.ok) {
-        // Fallback to proxy if backend is unavailable (e.g. static hosting)
-        console.warn("Backend unavailable, falling back to public CORS proxies...");
-        const mapiraUrl = `https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB`;
-        
-        const [proxyMapira, proxyXe] = await Promise.allSettled([
-           fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(mapiraUrl)}&_nocache=${timestamp}`).then(r => r.json()),
-           fetch(`https://open.er-api.com/v6/latest/USD?_nocache=${timestamp}`).then(r => r.json())
-        ]);
-        
-        if (proxyMapira.status === 'fulfilled' && proxyMapira.value?.contents) {
-           try {
-               const parsedMapira = JSON.parse(proxyMapira.value.contents);
-               if (parsedMapira?.ask?.items) {
-                   const items = parsedMapira.ask.items;
-                   if (items.length > 11) usdtRubRaw = parseFloat(items[11].price);
-                   else if (items.length > 0) usdtRubRaw = parseFloat(items[items.length - 1].price);
-               }
-           } catch(e) { console.error("Error parsing allorigins mapira", e); }
-        }
-        
-        if (proxyXe.status === 'fulfilled') {
-          if (proxyXe.value?.rates?.EUR) {
-             xeEur = proxyXe.value.rates.EUR;
-          }
-          if (usdtRubRaw === 0 && proxyXe.value?.rates?.RUB) {
-             usdtRubRaw = proxyXe.value.rates.RUB * 1.052;
-          }
-        }
-      } else {
+      if (ratesRes && ratesRes.ok) {
           const ratesData = await ratesRes.json();
-          usdtRubRaw = ratesData.usdtRubRaw;
-          xeEur = ratesData.xeEur;
+          usdtRubRaw = ratesData.usdtRubRaw || 0;
+          xeEur = ratesData.xeEur || 0;
+      } else {
+          console.error("Backend rates fetch failed.");
       }
 
       // Calculations according to business rules:
