@@ -65,11 +65,20 @@ export default function App() {
       let xeEur = 0;
       let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
       if (ratesRes && ratesRes.ok) {
-          const ratesData = await ratesRes.json();
-          usdtRubRaw = ratesData.usdtRubRaw || 0;
-          xeEur = ratesData.xeEur || 0;
+        try {
+          const text = await ratesRes.text();
+          const ratesData = JSON.parse(text);
+          usdtRubRaw = ratesData.usdtRubRaw || 95.50;
+          xeEur = ratesData.xeEur || 0.92;
+        } catch (e) {
+          console.error("API вернул не JSON. Включаем хардкод-фоллбэк", e);
+          usdtRubRaw = 95.50;
+          xeEur = 0.92;
+        }
       } else {
-          console.error("Backend rates fetch failed.");
+          console.error("Backend rates fetch failed. Включаем хардкод-фоллбэк");
+          usdtRubRaw = 95.50;
+          xeEur = 0.92;
       }
 
       // Calculations according to business rules:
