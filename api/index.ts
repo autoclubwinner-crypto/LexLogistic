@@ -12,8 +12,10 @@ app.get("/api/rates", async (req, res) => {
       fetch('https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB', {
           method: 'POST',
           headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-              'Accept': 'application/json'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json',
+              'Origin': 'https://rapira.net',
+              'Referer': 'https://rapira.net/'
           }
       }),
       fetch('https://open.er-api.com/v6/latest/USD')
