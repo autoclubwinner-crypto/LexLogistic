@@ -235,6 +235,9 @@ export default function App() {
   const [newsData, setNewsData] = useState<NewsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
   const [adminClicks, setAdminClicks] = useState(0);
 
   const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => {
@@ -266,12 +269,26 @@ export default function App() {
     setAdminClicks(prev => {
       const newClicks = prev + 1;
       if (newClicks >= 5) {
-        setShowAdmin(true);
+        setPasswordInput('');
+        setPasswordError(false);
+        setShowPasswordModal(true);
         return 0;
       }
       return newClicks;
     });
     setTimeout(() => setAdminClicks(0), 3000); // reset after 3 sec
+  };
+
+  const handlePasswordSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (passwordInput === 'atlas0999') {
+      setShowPasswordModal(false);
+      setPasswordInput('');
+      setPasswordError(false);
+      setShowAdmin(true);
+    } else {
+      setPasswordError(true);
+    }
   };
 
   const adminSettingsRef = useRef(adminSettings);
@@ -890,6 +907,62 @@ export default function App() {
         </div>
       </footer>
       
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <form 
+            onSubmit={handlePasswordSubmit}
+            className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold text-lg border border-emerald-500/20">
+                🔒
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Вход в панель</h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">Введите пароль администратора</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <input 
+                type="password"
+                autoFocus
+                placeholder="Пароль..."
+                value={passwordInput}
+                onChange={(e) => {
+                  setPasswordInput(e.target.value);
+                  setPasswordError(false);
+                }}
+                className={`w-full bg-slate-50 dark:bg-zinc-950 border ${passwordError ? 'border-red-500 ring-2 ring-red-500/20' : 'border-slate-200 dark:border-zinc-800 focus:ring-2 focus:ring-emerald-500'} rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none transition-all`}
+              />
+              {passwordError && (
+                <p className="text-xs text-red-500 font-medium">Неверный пароль. Попробуйте еще раз.</p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button 
+                type="button"
+                onClick={() => {
+                  setShowPasswordModal(false);
+                  setPasswordInput('');
+                  setPasswordError(false);
+                }}
+                className="flex-1 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 font-medium py-2.5 rounded-xl hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors text-sm"
+              >
+                Отмена
+              </button>
+              <button 
+                type="submit"
+                className="flex-1 bg-emerald-500 text-white font-medium py-2.5 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 text-sm"
+              >
+                Войти
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {showAdmin && (
         <AdminPanel
           settings={adminSettings}
