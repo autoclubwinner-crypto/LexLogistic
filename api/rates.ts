@@ -3,7 +3,7 @@ import axios from "axios";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
-export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: number }> {
+export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: number; success: boolean }> {
   let usdtRubRaw = 0;
   let xeEur = 0;
 
@@ -82,13 +82,21 @@ export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: num
     if (!usdtRubRaw && usd.rub) usdtRubRaw = parseFloat(usd.rub) * 1.025;
   }
 
+  let success = true;
   // 6. Гарантированный безопасный фоллбэк (Никогда не отдавать 0 или NaN)
-  if (!usdtRubRaw || isNaN(usdtRubRaw) || usdtRubRaw <= 0) usdtRubRaw = 95.50;
-  if (!xeEur || isNaN(xeEur) || xeEur <= 0) xeEur = 0.92;
+  if (!usdtRubRaw || isNaN(usdtRubRaw) || usdtRubRaw <= 0) {
+    usdtRubRaw = 95.50;
+    success = false;
+  }
+  if (!xeEur || isNaN(xeEur) || xeEur <= 0) {
+    xeEur = 0.92;
+    success = false;
+  }
 
   return {
     usdtRubRaw: Number(usdtRubRaw.toFixed(4)),
     xeEur: Number(xeEur.toFixed(6)),
+    success
   };
 }
 
@@ -105,6 +113,6 @@ export default async function handler(req: any, res: any) {
     const data = await fetchRatesData();
     return res.status(200).json(data);
   } catch (error: any) {
-    return res.status(200).json({ usdtRubRaw: 95.50, xeEur: 0.92 });
+    return res.status(200).json({ usdtRubRaw: 95.50, xeEur: 0.92, success: false });
   }
 }
