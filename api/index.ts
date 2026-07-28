@@ -6,52 +6,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Главный роут курсов
-app.get(["/api/rates", "/rates"], async (req, res) => {
-  try {
-    let usdtRubRaw = 0;
-    let xeEur = 0;
+const commonHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Cache-Control': 'no-cache',
+};
 
-    // 1. CoinGecko API (Не блокирует дата-центры Vercel, дает 100% точный крипто-курс)
-    try {
-        const cgRes = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub,eur', { timeout: 5000 });
-        if (cgRes.data?.tether?.rub) usdtRubRaw = cgRes.data.tether.rub;
-        if (cgRes.data?.tether?.eur) xeEur = cgRes.data.tether.eur;
-    } catch (e) {
-        console.error("CoinGecko Error:", e.message);
-    }
-
-    // 2. Garantex Fallback (На случай, если CoinGecko лежит)
-    if (usdtRubRaw === 0) {
-        try {
-            const garantexRes = await axios.get('https://garantex.org/api/v2/depth?market=usdtrub', { timeout: 4000 });
-            if (garantexRes.data?.asks?.length > 0) {
-                usdtRubRaw = parseFloat(garantexRes.data.asks[0].price);
-            }
-        } catch (e) {}
-    }
-
-    // 3. Железобетонный CDN Fallback (Если легла вся крипта, берем обычный валютный курс)
-    if (usdtRubRaw === 0 || xeEur === 0) {
-        try {
-            const fallback = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 4000 });
-            if (xeEur === 0 && fallback.data?.usd?.eur) xeEur = fallback.data.usd.eur;
-            if (usdtRubRaw === 0 && fallback.data?.usd?.rub) usdtRubRaw = fallback.data.usd.rub * 1.052; // Накидываем 5.2% премию крипты
-        } catch (e) {}
-    }
-
-    // 4. Последняя линия защиты (чтобы не было нулей)
-    if (!usdtRubRaw || usdtRubRaw === 0) usdtRubRaw = 95.50;
-    if (!xeEur || xeEur === 0) xeEur = 0.92;
-
-    res.json({ usdtRubRaw, xeEur });
-  } catch (e) {
-    res.status(500).json({ error: "Failed", usdtRubRaw: 95.50, xeEur: 0.92 });
-  }
-});
-
-// Роут новостей
-app.get(["/api/news", "/news"], async (req, res) => {
+// ЛОВИМ АБСОЛЮТНО ВСЕ ЗАПРОСЫ (защита от "обрезания" путей Vercel)
+app.all('*', async (req, res) => {
+  
+  // 1. ЕСЛИ ЗАПРОСИЛИ НОВОСТИ (Проверяем URL на наличие слова news)
+  if (req.url.includes('news')) {
     const rssSources = [
       "https://rssexport.rbc.ru/rbcnews/news/30/full.rss",
       "https://www.kommersant.ru/RSS/news.xml",
@@ -67,10 +32,55 @@ app.get(["/api/news", "/news"], async (req, res) => {
             results[source] = null;
         }
     }));
-    res.json(results);
+    return res.json(results);
+  }
+
+  // 2. ЕСЛИ ЗАПРОСИЛИ КУРСЫ ВАЛЮТ (Для всех остальных запросов)
+  try {
+    let cgRes: any = null;
+    let garantexRes: any = null;
+    let fallbackRes: any = null;
+
+    // Делаем 3 запроса одновременно, ждем максимум 4.5 секунды
+    await Promise.allSettled([
+      axios.get('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub,eur', { timeout: 4500 }).then(r => cgRes = r).catch(() => {}),
+      axios.get('https://garantex.org/api/v2/depth?market=usdtrub', { headers: commonHeaders, timeout: 4500 }).then(r => garantexRes = r).catch(() => {}),
+      axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 4500 }).then(r => fallbackRes = r).catch(() => {})
+    ]);
+
+    let usdtRubRaw = 0;
+    let xeEur = 0;
+
+    // Шаг 1: Берем базу из железобетонного банковского API (если другие лежат)
+    if (fallbackRes?.data?.usd) {
+        xeEur = fallbackRes.data.usd.eur;
+        usdtRubRaw = fallbackRes.data.usd.rub * 1.052; // +5.2% наценка рынка
+    }
+
+    // Шаг 2: Перезаписываем точными данными из CoinGecko (Евро и Рубль)
+    if (cgRes?.data?.tether) {
+        if (cgRes.data.tether.rub) usdtRubRaw = cgRes.data.tether.rub;
+        if (cgRes.data.tether.eur) xeEur = cgRes.data.tether.eur;
+    }
+
+    // Шаг 3: Рубль перезаписываем точнейшей биржей Garantex (самый важный курс)
+    if (garantexRes?.data?.asks?.length > 0) {
+        usdtRubRaw = parseFloat(garantexRes.data.asks[0].price);
+    }
+
+    // Финальная проверка на нули (чтобы сайт точно не сломался)
+    if (!usdtRubRaw || usdtRubRaw === 0) usdtRubRaw = 95.50;
+    if (!xeEur || xeEur === 0) xeEur = 0.92;
+
+    return res.json({ usdtRubRaw, xeEur });
+  } catch (e) {
+    console.error("Critical API Error:", e);
+    // При жестком сбое отдаем запасные цифры
+    return res.status(500).json({ error: "Failed", usdtRubRaw: 95.50, xeEur: 0.92 });
+  }
 });
 
-// Запуск для локальной среды
+// Запуск для локальной разработки
 if (process.env.NODE_ENV !== "production") {
     app.listen(3001, () => console.log(`Dev server on 3001`));
 }
