@@ -11,7 +11,7 @@ async function test() {
         try {
             console.log(`Testing ${proxy}...`);
             const res = await fetch(proxy + "https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
-                method: 'POST',
+                method: "GET",
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                 }
