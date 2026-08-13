@@ -8,7 +8,7 @@ export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: num
   let xeEur = 0;
 
   // Параллельный опрос всех основных и альтернативных источников (Таймаут 3.5 сек)
-  const [rapiraRes, garantexRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
+  const [rapiraRes, garantexRes, cbrRes, erRes, fawazRes, bybitRes] = await Promise.allSettled([
     axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
       timeout: 3500,
       headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
@@ -29,6 +29,12 @@ export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: num
       "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
       { timeout: 3500 }
     ),
+    axios.post("https://api2.bybit.com/fiat/otc/item/online", {
+      userId: "", tokenId: "USDT", currencyId: "RUB", payment: [], side: "1", size: "10", page: "1", amount: "50000", authMaker: false, canTrade: false
+    }, {
+      timeout: 3500,
+      headers: { "User-Agent": BROWSER_UA, "Content-Type": "application/json" }
+    })
   ]);
 
   // 1. Источник: Rapira API
@@ -40,6 +46,15 @@ export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: num
         const val = parseFloat(item.price);
         if (!isNaN(val) && val > 0) usdtRubRaw = val;
       }
+    }
+  }
+
+  // 1.5 Источник: Bybit P2P (как замена если Рапира упала)
+  if (!usdtRubRaw && bybitRes.status === "fulfilled" && bybitRes.value?.data?.result?.items) {
+    const items = bybitRes.value.data.result.items;
+    if (Array.isArray(items) && items.length > 0 && items[0]?.price) {
+      const val = parseFloat(items[0].price);
+      if (!isNaN(val) && val > 0) usdtRubRaw = val;
     }
   }
 
