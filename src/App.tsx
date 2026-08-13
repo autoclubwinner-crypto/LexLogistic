@@ -4,7 +4,7 @@
  */
 
 import { Activity, RefreshCcw, TrendingUp, Newspaper, ExternalLink, Calculator as CalcIcon, Sun, Moon, Monitor } from "lucide-react";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 export interface AdminSettings {
   usdtTblPercent: number;
