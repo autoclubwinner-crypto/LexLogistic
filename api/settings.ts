@@ -1,9 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { kv } from "@vercel/kv";
 
 const IS_VERCEL = process.env.VERCEL === "1";
-// Vercel KV fallback to local file
+// Vercel fallback to local file (Vercel only allows writing to /tmp)
 const SETTINGS_FILE = IS_VERCEL ? "/tmp/settings.json" : path.join(process.cwd(), ".data", "settings.json");
 
 export interface AdminSettings {
@@ -25,15 +24,6 @@ const defaultSettings: AdminSettings = {
 };
 
 export async function getSettings(): Promise<AdminSettings> {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      const data = await kv.get("adminSettings");
-      if (data) return data as AdminSettings;
-    } catch (e) {
-      console.error("Failed to read from KV", e);
-    }
-  }
-
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
@@ -47,14 +37,6 @@ export async function getSettings(): Promise<AdminSettings> {
 }
 
 export async function saveSettings(settings: AdminSettings): Promise<void> {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      await kv.set("adminSettings", settings);
-    } catch (e) {
-      console.error("Failed to write to KV", e);
-    }
-  }
-
   try {
     if (!fs.existsSync(path.dirname(SETTINGS_FILE))) {
       fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
