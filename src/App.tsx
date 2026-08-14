@@ -213,6 +213,7 @@ interface RatesData {
   rates: Rate[];
   lastChecked?: string;
   isStale?: boolean;
+  isManualOverride?: boolean;
 }
 
 interface NewsItem {
@@ -240,30 +241,28 @@ export default function App() {
   const [passwordError, setPasswordError] = useState(false);
   const [adminClicks, setAdminClicks] = useState(0);
 
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => {
-    const saved = localStorage.getItem('adminSettings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          usdtTblPercent: parsed.usdtTblPercent ?? (parsed.usdtTblOffset ? Number(((parsed.usdtTblOffset - 1) * 100).toFixed(4)) : 1.3),
-          usdtSwiftPercent: parsed.usdtSwiftPercent ?? (parsed.usdtSwiftOffset ? Number(((parsed.usdtSwiftOffset - 1) * 100).toFixed(4)) : 1.0),
-          eurUsdCrossPercent: parsed.eurUsdCrossPercent ?? (parsed.eurUsdCrossMultiplier ? Number(((parsed.eurUsdCrossMultiplier - 1) * 100).toFixed(4)) : 0.3),
-          eurUsdCrossAdd: parsed.eurUsdCrossAdd ?? 0.002,
-          usdtBaseOverride: parsed.usdtBaseOverride || '',
-          eurBaseOverride: parsed.eurBaseOverride || ''
-        };
-      } catch (e) {}
-    }
-    return {
-      usdtTblPercent: 1.3,
-      usdtSwiftPercent: 1.0,
-      eurUsdCrossPercent: 0.3,
-      eurUsdCrossAdd: 0.002,
-      usdtBaseOverride: '',
-      eurBaseOverride: ''
-    };
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
+    usdtTblPercent: 1.3,
+    usdtSwiftPercent: 1.0,
+    eurUsdCrossPercent: 0.3,
+    eurUsdCrossAdd: 0.002,
+    usdtBaseOverride: '',
+    eurBaseOverride: ''
   });
+
+  const saveSettingsToServer = async (newSettings: AdminSettings) => {
+    try {
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings)
+      });
+      setAdminSettings(newSettings);
+      fetchAllData();
+    } catch (e) {
+      console.error("Failed to save settings", e);
+    }
+  };
   
   const handleAdminTitleClick = () => {
     setAdminClicks(prev => {
@@ -279,14 +278,23 @@ export default function App() {
     setTimeout(() => setAdminClicks(0), 3000); // reset after 3 sec
   };
 
-  const handlePasswordSubmit = (e?: React.FormEvent) => {
+  const handlePasswordSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (passwordInput === 'atlas0999') {
-      setShowPasswordModal(false);
-      setPasswordInput('');
-      setPasswordError(false);
-      setShowAdmin(true);
-    } else {
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput })
+      });
+      if (res.ok) {
+        setShowPasswordModal(false);
+        setPasswordInput('');
+        setPasswordError(false);
+        setShowAdmin(true);
+      } else {
+        setPasswordError(true);
+      }
+    } catch (error) {
       setPasswordError(true);
     }
   };
@@ -294,8 +302,6 @@ export default function App() {
   const adminSettingsRef = useRef(adminSettings);
   useEffect(() => {
     adminSettingsRef.current = adminSettings;
-    localStorage.setItem('adminSettings', JSON.stringify(adminSettings));
-    fetchAllData(); // Re-fetch when admin settings change
   }, [adminSettings]);
   
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -331,6 +337,11 @@ export default function App() {
           usdtRubRaw = ratesData.usdtRubRaw || 0;
           xeEur = ratesData.xeEur || 0;
           fetchSuccess = ratesData.success === true;
+          
+          if (ratesData.settings) {
+            setAdminSettings(ratesData.settings);
+            adminSettingsRef.current = ratesData.settings;
+          }
         } catch (e) {
           console.error("API вернул не JSON. Включаем кеш-фоллбэк", e);
         }
@@ -360,15 +371,18 @@ export default function App() {
 
       // Calculations according to business rules:
       const currentSettings = adminSettingsRef.current;
+      let isManualOverride = false;
       
       // Overrides
       if (currentSettings.usdtBaseOverride && !isNaN(parseFloat(currentSettings.usdtBaseOverride))) {
         usdtRubRaw = parseFloat(currentSettings.usdtBaseOverride);
         isStale = false; // Manually forced value is always fresh
+        isManualOverride = true;
       }
       if (currentSettings.eurBaseOverride && !isNaN(parseFloat(currentSettings.eurBaseOverride))) {
         xeEur = parseFloat(currentSettings.eurBaseOverride);
         isStale = false;
+        isManualOverride = true;
       }
 
       const rubUsdt = usdtRubRaw;
@@ -439,7 +453,8 @@ export default function App() {
         date: dateStr, 
         rates,
         lastChecked: lastCheckedTime,
-        isStale: isStale
+        isStale: isStale,
+        isManualOverride
       });
 
       // 3. Загрузка новостей (RSS) через локальный proxy
@@ -656,6 +671,11 @@ export default function App() {
                 <div className="text-[11px] sm:text-[13px] text-slate-600 dark:text-zinc-400 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
                   Данные на: <span className="text-slate-900 dark:text-white font-medium ml-1">{ratesData.date}</span>
                 </div>
+                {ratesData.isManualOverride && (
+                  <div className="text-[10px] mr-2 text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                    Ручной курс
+                  </div>
+                )}
                 {ratesData.lastChecked && (
                    <div className={`text-[10px] mr-2 ${ratesData.isStale ? 'text-red-500 font-bold' : 'text-slate-500 dark:text-zinc-500'}`}>
                      {ratesData.isStale ? 'Устарело (Кеш): ' : 'Проверено: '}{ratesData.lastChecked}
@@ -967,7 +987,7 @@ export default function App() {
         <AdminPanel
           settings={adminSettings}
           onSave={(newSettings) => {
-            setAdminSettings(newSettings);
+            saveSettingsToServer(newSettings);
             setShowAdmin(false);
           }}
           onClose={() => setShowAdmin(false)}
