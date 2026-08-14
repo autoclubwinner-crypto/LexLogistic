@@ -240,7 +240,6 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [adminClicks, setAdminClicks] = useState(0);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     usdtTblPercent: 1.3,
@@ -381,7 +380,7 @@ export default function App() {
             }
             
             if (directSuccess && usdtRubRaw > 0 && xeEur > 0) {
-              isStale = true;
+              isStale = false;
               lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + " (Direct)";
               fetchSuccess = true; // Mark as success so we don't fall back to 95.50
             } else {
@@ -405,13 +404,6 @@ export default function App() {
           }
       }
       
-      // DIAGNOSTIC STATE
-      setDebugInfo({
-        ok: ratesRes?.ok,
-        status: ratesRes?.status,
-        successFlag: fetchSuccess
-      });
-
       // Calculations according to business rules:
       const currentSettings = adminSettingsRef.current;
       let isManualOverride = false;
@@ -724,13 +716,6 @@ export default function App() {
                      {ratesData.isStale ? 'Устарело (Кеш): ' : 'Проверено: '}{ratesData.lastChecked}
                    </div>
                 )}
-              </div>
-            )}
-            {debugInfo && (
-              <div className="flex flex-col items-end gap-1 mt-2">
-                <div className="text-[10px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 p-2 rounded w-full">
-                  DEBUG INFO: fetch.ok={String(debugInfo.ok)}, status={debugInfo.status}, fetchSuccess={String(debugInfo.successFlag)}
-                </div>
               </div>
             )}
           </div>
