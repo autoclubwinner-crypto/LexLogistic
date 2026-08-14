@@ -1,46 +1,91 @@
-const fs = require('fs');
-let code = fs.readFileSync('src/App.tsx', 'utf-8');
+import crypto from "crypto";
+import express, { Request, Response } from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import { fetchRatesData, getCachedRates, updateCache } from "./api/rates";
+import { fetchNewsData } from "./api/news";
+import { getSettings, saveSettings } from "./api/settings";
+import jwt from "jsonwebtoken";
+import path from "path";
+import { createServer as createViteServer } from "vite";
 
-const replacements = [
-  ['bg-[#09090b]', 'bg-slate-50 dark:bg-zinc-950'],
-  ['text-[#fafafa]', 'text-slate-900 dark:text-[#fafafa]'],
-  ['border-[#27272a]', 'border-slate-200 dark:border-[#27272a]'],
-  ['text-[#a1a1aa]', 'text-slate-500 dark:text-[#a1a1aa]'],
-  ['bg-zinc-900', 'bg-slate-100 dark:bg-zinc-900'],
-  ['bg-zinc-950/50', 'bg-white/80 dark:bg-zinc-950/50'],
-  ['bg-zinc-900/50', 'bg-slate-100/80 dark:bg-zinc-900/50'],
-  ['bg-zinc-800/50', 'bg-white/60 dark:bg-zinc-800/50'],
-  ['bg-zinc-800', 'bg-slate-200 dark:bg-zinc-800'],
-  ['bg-[#0d0d0f]', 'bg-white dark:bg-[#0d0d0f]'],
-  ['hover:bg-[#131316]', 'hover:bg-slate-50 dark:hover:bg-[#131316]'],
-  ['border-zinc-800/80', 'border-slate-200 dark:border-zinc-800/80'],
-  ['border-zinc-800/50', 'border-slate-200 dark:border-zinc-800/50'],
-  ['border-zinc-800', 'border-slate-200 dark:border-zinc-800'],
-  ['border-zinc-700/80', 'border-slate-300 dark:border-zinc-700/80'],
-  ['border-white/10', 'border-black/5 dark:border-white/10'],
-  ['border-white/5', 'border-black/5 dark:border-white/5'],
-  ['text-zinc-500', 'text-slate-500 dark:text-zinc-500'],
-  ['text-zinc-600', 'text-slate-400 dark:text-zinc-600'],
-  ['text-zinc-400', 'text-slate-600 dark:text-zinc-400'],
-  ['text-zinc-300', 'text-slate-700 dark:text-zinc-300'],
-  ['text-zinc-100', 'text-slate-800 dark:text-zinc-100'],
-  ['text-white', 'text-slate-900 dark:text-white'],
-  ['bg-black/40', 'bg-white/80 dark:bg-black/40'],
-  ['from-zinc-900/80 to-zinc-950/80', 'from-slate-100 to-slate-200/50 dark:from-zinc-900/80 dark:to-zinc-950/80'],
-  ['from-zinc-800/80 to-zinc-900/80', 'from-white to-slate-100 dark:from-zinc-800/80 dark:to-zinc-900/80'],
-  ['shadow-[0_8px_30px_rgb(0,0,0,0.4)]', 'shadow-xl dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)]']
-];
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
 
-for (const [find, replace] of replacements) {
-    code = code.split(find).join(replace);
+  app.use(cors({ origin: true, credentials: true }));
+  app.use(express.json());
+  app.use(cookieParser());
+
+  const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-for-dev";
+  const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918";
+
+  const authenticateToken = (req: Request, res: Response, next: any) => {
+    const token = req.cookies.adminToken || req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      jwt.verify(token, JWT_SECRET);
+      next();
+    } catch (err) {
+      return res.status(403).json({ error: "Invalid token" });
+    }
+  };
+
+  app.post("/api/admin/login", (req: Request, res: Response) => {
+    const { password } = req.body;
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    if (hash === ADMIN_PASSWORD_HASH || password === process.env.ADMIN_PASSWORD) {
+      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '12h' });
+      res.cookie('adminToken', token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: 'strict', maxAge: 12 * 3600 * 1000 });
+      return res.json({ success: true, token });
+    }
+    return res.status(401).json({ error: "Invalid password" });
+  });
+
+  app.post("/api/admin/settings", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      await saveSettings(req.body);
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: "Failed to save settings" });
+    }
+  });
+
+  app.get("/api/rates", async (req: Request, res: Response) => {
+    const settings = await getSettings();
+    const rates = await getCachedRates();
+    return res.json({ ...rates, settings });
+  });
+
+  app.get("/api/cron/fetch", async (req: Request, res: Response) => {
+    await updateCache();
+    return res.json({ success: true });
+  });
+
+  app.get("/api/news", async (req: Request, res: Response) => {
+    const newsData = await fetchNewsData();
+    return res.json(newsData);
+  });
+
+  setInterval(updateCache, 30000);
+
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-// Revert text-slate-900 for the red update button and rate icons where we want text-white
-code = code.replace(/<span className="text-\[7px\] sm:text-\[8px\] font-black text-slate-900 dark:text-white uppercase tracking-wider leading-none select-none">Обновить<\/span>/g, '<span className="text-[7px] sm:text-[8px] font-black text-white uppercase tracking-wider leading-none select-none">Обновить</span>');
-code = code.replace(/text-slate-900 dark:text-white \${isLoading \? 'animate-spin'/g, "text-white ${isLoading ? 'animate-spin'");
-code = code.replace(/text-slate-900 dark:text-white drop-shadow-md/g, "text-slate-900 dark:text-white");
-// ensure specific instances look right
-code = code.replace(/text-slate-900 dark:text-white ml-1/g, 'text-slate-900 dark:text-white ml-1');
-
-fs.writeFileSync('src/App.tsx', code);
-console.log('Done');
+startServer();
