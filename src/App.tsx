@@ -240,6 +240,7 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [adminClicks, setAdminClicks] = useState(0);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     usdtTblPercent: 1.3,
@@ -329,10 +330,14 @@ export default function App() {
       let isStale = false;
       let lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
-      let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
+      let ratesRes = await fetch(`/api/rates?_t=${timestamp}`, { credentials: "include" }).catch((e) => {
+        console.error("Fetch API error:", e);
+        return null;
+      });
       if (ratesRes && ratesRes.ok) {
         try {
           const text = await ratesRes.text();
+          console.log("Raw API Response:", text.substring(0, 100)); // Debug log
           const ratesData = JSON.parse(text);
           usdtRubRaw = ratesData.usdtRubRaw || 0;
           xeEur = ratesData.xeEur || 0;
@@ -343,10 +348,10 @@ export default function App() {
             adminSettingsRef.current = ratesData.settings;
           }
         } catch (e) {
-          console.error("API вернул не JSON. Включаем кеш-фоллбэк", e);
+          console.error("API вернул не JSON. Включаем прямой браузерный фоллбэк. Ошибка:", e);
         }
       } else {
-          console.error("Backend rates fetch failed. Включаем кеш-фоллбэк");
+          console.error("Backend rates fetch failed. Status:", ratesRes?.status, ratesRes?.statusText);
       }
 
       if (fetchSuccess && usdtRubRaw > 0 && xeEur > 0) {
@@ -354,20 +359,58 @@ export default function App() {
           localStorage.setItem('cachedRatesTime', Date.now().toString());
           isStale = false;
       } else {
-          const cachedRatesStr = localStorage.getItem('cachedRates');
-          const cachedTimeStr = localStorage.getItem('cachedRatesTime');
-          if (cachedRatesStr && cachedTimeStr) {
-              const cachedRates = JSON.parse(cachedRatesStr);
-              usdtRubRaw = cachedRates.usdtRubRaw;
-              xeEur = cachedRates.xeEur;
-              lastCheckedTime = new Date(parseInt(cachedTimeStr, 10)).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+          console.log("Backend failed, attempting direct browser fetch to CBR/Fawaz...");
+          try {
+            const [cbr, fawaz] = await Promise.allSettled([
+              fetch("https://www.cbr-xml-daily.ru/daily_json.js").then(res => res.json()),
+              fetch("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json").then(res => res.json())
+            ]);
+            
+            let directSuccess = false;
+            
+            if (cbr.status === "fulfilled" && cbr.value?.Valute?.USD?.Value) {
+               usdtRubRaw = parseFloat(cbr.value.Valute.USD.Value) * 1.025; // apply 2.5% margin like backend
+               if (cbr.value?.Valute?.EUR?.Value) {
+                 xeEur = cbr.value.Valute.USD.Value / cbr.value.Valute.EUR.Value;
+               }
+               directSuccess = true;
+            } else if (fawaz.status === "fulfilled" && fawaz.value?.usd?.rub) {
+               usdtRubRaw = parseFloat(fawaz.value.usd.rub) * 1.025;
+               xeEur = parseFloat(fawaz.value.usd.eur);
+               directSuccess = true;
+            }
+            
+            if (directSuccess && usdtRubRaw > 0 && xeEur > 0) {
               isStale = true;
-          } else {
-              usdtRubRaw = 95.50;
-              xeEur = 0.92;
-              isStale = true;
+              lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + " (Direct)";
+              fetchSuccess = true; // Mark as success so we don't fall back to 95.50
+            } else {
+              throw new Error("Direct fetch failed");
+            }
+          } catch (e) {
+            console.error("Direct browser fetch failed too. Using localStorage or 95.50");
+            const cachedRatesStr = localStorage.getItem('cachedRates');
+            const cachedTimeStr = localStorage.getItem('cachedRatesTime');
+            if (cachedRatesStr && cachedTimeStr) {
+                const cachedRates = JSON.parse(cachedRatesStr);
+                usdtRubRaw = cachedRates.usdtRubRaw;
+                xeEur = cachedRates.xeEur;
+                lastCheckedTime = new Date(parseInt(cachedTimeStr, 10)).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                isStale = true;
+            } else {
+                usdtRubRaw = 95.50;
+                xeEur = 0.92;
+                isStale = true;
+            }
           }
       }
+      
+      // DIAGNOSTIC STATE
+      setDebugInfo({
+        ok: ratesRes?.ok,
+        status: ratesRes?.status,
+        successFlag: fetchSuccess
+      });
 
       // Calculations according to business rules:
       const currentSettings = adminSettingsRef.current;
@@ -681,6 +724,13 @@ export default function App() {
                      {ratesData.isStale ? 'Устарело (Кеш): ' : 'Проверено: '}{ratesData.lastChecked}
                    </div>
                 )}
+              </div>
+            )}
+            {debugInfo && (
+              <div className="flex flex-col items-end gap-1 mt-2">
+                <div className="text-[10px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 p-2 rounded w-full">
+                  DEBUG INFO: fetch.ok={String(debugInfo.ok)}, status={debugInfo.status}, fetchSuccess={String(debugInfo.successFlag)}
+                </div>
               </div>
             )}
           </div>
