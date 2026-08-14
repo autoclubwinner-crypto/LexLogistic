@@ -1,8 +1,10 @@
 import fs from "fs";
 import path from "path";
+import { kv } from "@vercel/kv";
 
+const IS_VERCEL = process.env.VERCEL === "1";
 // Vercel KV fallback to local file
-const SETTINGS_FILE = path.join(process.cwd(), ".data", "settings.json");
+const SETTINGS_FILE = IS_VERCEL ? "/tmp/settings.json" : path.join(process.cwd(), ".data", "settings.json");
 
 export interface AdminSettings {
   usdtTblPercent: number;
@@ -25,7 +27,6 @@ const defaultSettings: AdminSettings = {
 export async function getSettings(): Promise<AdminSettings> {
   if (process.env.KV_REST_API_URL) {
     try {
-      const { kv } = await import("@vercel/kv");
       const data = await kv.get("adminSettings");
       if (data) return data as AdminSettings;
     } catch (e) {
@@ -48,7 +49,6 @@ export async function getSettings(): Promise<AdminSettings> {
 export async function saveSettings(settings: AdminSettings): Promise<void> {
   if (process.env.KV_REST_API_URL) {
     try {
-      const { kv } = await import("@vercel/kv");
       await kv.set("adminSettings", settings);
     } catch (e) {
       console.error("Failed to write to KV", e);

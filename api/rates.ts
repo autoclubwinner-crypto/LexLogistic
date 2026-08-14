@@ -2,9 +2,11 @@ import { getSettings } from "./settings";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
+import { kv } from "@vercel/kv";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-const CACHE_FILE = path.join(process.cwd(), ".data", "ratesCache.json");
+const IS_VERCEL = process.env.VERCEL === "1";
+const CACHE_FILE = IS_VERCEL ? "/tmp/ratesCache.json" : path.join(process.cwd(), ".data", "ratesCache.json");
 
 let memoryCache: any = {
   usdtRubRaw: 0,
@@ -182,7 +184,6 @@ export async function updateCache() {
       fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
       
       if (process.env.KV_REST_API_URL) {
-        const { kv } = await import("@vercel/kv");
         await kv.set("ratesCache", finalData);
       }
     } catch (e) {
@@ -194,7 +195,6 @@ export async function updateCache() {
 export async function getCachedRates() {
   if (process.env.KV_REST_API_URL) {
     try {
-      const { kv } = await import("@vercel/kv");
       const data = await kv.get("ratesCache");
       if (data) return data;
     } catch (e) {
