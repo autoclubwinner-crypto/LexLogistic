@@ -1,3 +1,4 @@
+import { getSettings } from "./settings";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
@@ -5,10 +6,10 @@ import path from "path";
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const CACHE_FILE = path.join(process.cwd(), ".data", "ratesCache.json");
 
-let memoryCache = {
-  usdtRubRaw: 95.50,
-  xeEur: 0.92,
-  success: true
+let memoryCache: any = {
+  usdtRubRaw: 0,
+  xeEur: 0,
+  success: false
 };
 
 let fallbackStreak = 0;
@@ -210,6 +211,11 @@ export async function getCachedRates() {
     console.error("Failed to read ratesCache.json", e);
   }
   
+    if (!memoryCache.success || memoryCache.usdtRubRaw === 0) {
+    console.log("[RATES] Cache empty, fetching synchronously...");
+    await updateCache();
+  }
+  
   return memoryCache;
 }
 
@@ -228,8 +234,9 @@ export default async function handler(req: any, res: any) {
   if (req.method === "OPTIONS") return res.status(200).end();
   
   try {
-    const data = await getCachedRates();
-    return res.status(200).json(data);
+    const data: any = await getCachedRates();
+    const settings = await getSettings();
+    return res.status(200).json({ ...data, settings });
   } catch (error: any) {
     return res.status(200).json({ usdtRubRaw: 95.50, xeEur: 0.92, success: false });
   }
