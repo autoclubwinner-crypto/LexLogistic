@@ -213,7 +213,6 @@ interface RatesData {
   rates: Rate[];
   lastChecked?: string;
   isStale?: boolean;
-  isManualOverride?: boolean;
 }
 
 interface NewsItem {
@@ -241,28 +240,30 @@ export default function App() {
   const [passwordError, setPasswordError] = useState(false);
   const [adminClicks, setAdminClicks] = useState(0);
 
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
-    usdtTblPercent: 1.3,
-    usdtSwiftPercent: 1.0,
-    eurUsdCrossPercent: 0.3,
-    eurUsdCrossAdd: 0.002,
-    usdtBaseOverride: '',
-    eurBaseOverride: ''
-  });
-
-  const saveSettingsToServer = async (newSettings: AdminSettings) => {
-    try {
-      await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
-      setAdminSettings(newSettings);
-      fetchAllData();
-    } catch (e) {
-      console.error("Failed to save settings", e);
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => {
+    const saved = localStorage.getItem('adminSettings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          usdtTblPercent: parsed.usdtTblPercent ?? (parsed.usdtTblOffset ? Number(((parsed.usdtTblOffset - 1) * 100).toFixed(4)) : 1.3),
+          usdtSwiftPercent: parsed.usdtSwiftPercent ?? (parsed.usdtSwiftOffset ? Number(((parsed.usdtSwiftOffset - 1) * 100).toFixed(4)) : 1.0),
+          eurUsdCrossPercent: parsed.eurUsdCrossPercent ?? (parsed.eurUsdCrossMultiplier ? Number(((parsed.eurUsdCrossMultiplier - 1) * 100).toFixed(4)) : 0.3),
+          eurUsdCrossAdd: parsed.eurUsdCrossAdd ?? 0.002,
+          usdtBaseOverride: parsed.usdtBaseOverride || '',
+          eurBaseOverride: parsed.eurBaseOverride || ''
+        };
+      } catch (e) {}
     }
-  };
+    return {
+      usdtTblPercent: 1.3,
+      usdtSwiftPercent: 1.0,
+      eurUsdCrossPercent: 0.3,
+      eurUsdCrossAdd: 0.002,
+      usdtBaseOverride: '',
+      eurBaseOverride: ''
+    };
+  });
   
   const handleAdminTitleClick = () => {
     setAdminClicks(prev => {
@@ -278,23 +279,14 @@ export default function App() {
     setTimeout(() => setAdminClicks(0), 3000); // reset after 3 sec
   };
 
-  const handlePasswordSubmit = async (e?: React.FormEvent) => {
+  const handlePasswordSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: passwordInput })
-      });
-      if (res.ok) {
-        setShowPasswordModal(false);
-        setPasswordInput('');
-        setPasswordError(false);
-        setShowAdmin(true);
-      } else {
-        setPasswordError(true);
-      }
-    } catch (error) {
+    if (passwordInput === 'atlas0999') {
+      setShowPasswordModal(false);
+      setPasswordInput('');
+      setPasswordError(false);
+      setShowAdmin(true);
+    } else {
       setPasswordError(true);
     }
   };
@@ -302,6 +294,8 @@ export default function App() {
   const adminSettingsRef = useRef(adminSettings);
   useEffect(() => {
     adminSettingsRef.current = adminSettings;
+    localStorage.setItem('adminSettings', JSON.stringify(adminSettings));
+    fetchAllData(); // Re-fetch when admin settings change
   }, [adminSettings]);
   
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -329,28 +323,19 @@ export default function App() {
       let isStale = false;
       let lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
-      let ratesRes = await fetch(`/api/rates?_t=${timestamp}`, { credentials: "include" }).catch((e) => {
-        console.error("Fetch API error:", e);
-        return null;
-      });
+      let ratesRes = await fetch(`/api/rates?_t=${timestamp}`).catch(() => null);
       if (ratesRes && ratesRes.ok) {
         try {
           const text = await ratesRes.text();
-          console.log("Raw API Response:", text.substring(0, 100)); // Debug log
           const ratesData = JSON.parse(text);
           usdtRubRaw = ratesData.usdtRubRaw || 0;
           xeEur = ratesData.xeEur || 0;
           fetchSuccess = ratesData.success === true;
-          
-          if (ratesData.settings) {
-            setAdminSettings(ratesData.settings);
-            adminSettingsRef.current = ratesData.settings;
-          }
         } catch (e) {
-          console.error("API вернул не JSON. Включаем прямой браузерный фоллбэк. Ошибка:", e);
+          console.error("API вернул не JSON. Включаем кеш-фоллбэк", e);
         }
       } else {
-          console.error("Backend rates fetch failed. Status:", ratesRes?.status, ratesRes?.statusText);
+          console.error("Backend rates fetch failed. Включаем кеш-фоллбэк");
       }
 
       if (fetchSuccess && usdtRubRaw > 0 && xeEur > 0) {
@@ -358,66 +343,32 @@ export default function App() {
           localStorage.setItem('cachedRatesTime', Date.now().toString());
           isStale = false;
       } else {
-          console.log("Backend failed, attempting direct browser fetch to CBR/Fawaz...");
-          try {
-            const [cbr, fawaz] = await Promise.allSettled([
-              fetch("https://www.cbr-xml-daily.ru/daily_json.js").then(res => res.json()),
-              fetch("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json").then(res => res.json())
-            ]);
-            
-            let directSuccess = false;
-            
-            if (cbr.status === "fulfilled" && cbr.value?.Valute?.USD?.Value) {
-               usdtRubRaw = parseFloat(cbr.value.Valute.USD.Value) * 1.025; // apply 2.5% margin like backend
-               if (cbr.value?.Valute?.EUR?.Value) {
-                 xeEur = cbr.value.Valute.USD.Value / cbr.value.Valute.EUR.Value;
-               }
-               directSuccess = true;
-            } else if (fawaz.status === "fulfilled" && fawaz.value?.usd?.rub) {
-               usdtRubRaw = parseFloat(fawaz.value.usd.rub) * 1.025;
-               xeEur = parseFloat(fawaz.value.usd.eur);
-               directSuccess = true;
-            }
-            
-            if (directSuccess && usdtRubRaw > 0 && xeEur > 0) {
-              isStale = false;
-              lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + " (Direct)";
-              fetchSuccess = true; // Mark as success so we don't fall back to 95.50
-            } else {
-              throw new Error("Direct fetch failed");
-            }
-          } catch (e) {
-            console.error("Direct browser fetch failed too. Using localStorage or 95.50");
-            const cachedRatesStr = localStorage.getItem('cachedRates');
-            const cachedTimeStr = localStorage.getItem('cachedRatesTime');
-            if (cachedRatesStr && cachedTimeStr) {
-                const cachedRates = JSON.parse(cachedRatesStr);
-                usdtRubRaw = cachedRates.usdtRubRaw;
-                xeEur = cachedRates.xeEur;
-                lastCheckedTime = new Date(parseInt(cachedTimeStr, 10)).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-                isStale = true;
-            } else {
-                usdtRubRaw = 95.50;
-                xeEur = 0.92;
-                isStale = true;
-            }
+          const cachedRatesStr = localStorage.getItem('cachedRates');
+          const cachedTimeStr = localStorage.getItem('cachedRatesTime');
+          if (cachedRatesStr && cachedTimeStr) {
+              const cachedRates = JSON.parse(cachedRatesStr);
+              usdtRubRaw = cachedRates.usdtRubRaw;
+              xeEur = cachedRates.xeEur;
+              lastCheckedTime = new Date(parseInt(cachedTimeStr, 10)).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+              isStale = true;
+          } else {
+              usdtRubRaw = 95.50;
+              xeEur = 0.92;
+              isStale = true;
           }
       }
-      
+
       // Calculations according to business rules:
       const currentSettings = adminSettingsRef.current;
-      let isManualOverride = false;
       
       // Overrides
       if (currentSettings.usdtBaseOverride && !isNaN(parseFloat(currentSettings.usdtBaseOverride))) {
         usdtRubRaw = parseFloat(currentSettings.usdtBaseOverride);
         isStale = false; // Manually forced value is always fresh
-        isManualOverride = true;
       }
       if (currentSettings.eurBaseOverride && !isNaN(parseFloat(currentSettings.eurBaseOverride))) {
         xeEur = parseFloat(currentSettings.eurBaseOverride);
         isStale = false;
-        isManualOverride = true;
       }
 
       const rubUsdt = usdtRubRaw;
@@ -488,8 +439,7 @@ export default function App() {
         date: dateStr, 
         rates,
         lastChecked: lastCheckedTime,
-        isStale: isStale,
-        isManualOverride
+        isStale: isStale
       });
 
       // 3. Загрузка новостей (RSS) через локальный proxy
@@ -706,11 +656,6 @@ export default function App() {
                 <div className="text-[11px] sm:text-[13px] text-slate-600 dark:text-zinc-400 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-inner self-start sm:self-auto">
                   Данные на: <span className="text-slate-900 dark:text-white font-medium ml-1">{ratesData.date}</span>
                 </div>
-                {ratesData.isManualOverride && (
-                  <div className="text-[10px] mr-2 text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                    Ручной курс
-                  </div>
-                )}
                 {ratesData.lastChecked && (
                    <div className={`text-[10px] mr-2 ${ratesData.isStale ? 'text-red-500 font-bold' : 'text-slate-500 dark:text-zinc-500'}`}>
                      {ratesData.isStale ? 'Устарело (Кеш): ' : 'Проверено: '}{ratesData.lastChecked}
@@ -1022,7 +967,7 @@ export default function App() {
         <AdminPanel
           settings={adminSettings}
           onSave={(newSettings) => {
-            saveSettingsToServer(newSettings);
+            setAdminSettings(newSettings);
             setShowAdmin(false);
           }}
           onClose={() => setShowAdmin(false)}
