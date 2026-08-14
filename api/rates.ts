@@ -2,7 +2,6 @@ import { getSettings } from "./settings";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import { kv } from "@vercel/kv";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const IS_VERCEL = process.env.VERCEL === "1";
@@ -13,7 +12,6 @@ let memoryCache: any = {
   xeEur: 0,
   success: false
 };
-
 let fallbackStreak = 0;
 
 export async function updateCache() {
@@ -163,6 +161,7 @@ export async function updateCache() {
     usdtRubRaw = memoryCache.usdtRubRaw || 95.50;
     success = false;
   }
+
   if (!xeEur || isNaN(xeEur) || xeEur <= 0) {
     xeEur = memoryCache.xeEur || 0.92;
     success = false;
@@ -176,16 +175,13 @@ export async function updateCache() {
 
   if (success) {
     memoryCache = finalData;
-    // Persist to file/KV
+    // Persist to file
     try {
       if (!fs.existsSync(path.dirname(CACHE_FILE))) {
         fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
       }
       fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
       
-      if (process.env.KV_REST_API_URL) {
-        await kv.set("ratesCache", finalData);
-      }
     } catch (e) {
       console.error("Failed to persist rates cache:", e);
     }
@@ -193,15 +189,6 @@ export async function updateCache() {
 }
 
 export async function getCachedRates() {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      const data = await kv.get("ratesCache");
-      if (data) return data;
-    } catch (e) {
-      console.error("Failed to read rates from KV", e);
-    }
-  }
-
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const data = fs.readFileSync(CACHE_FILE, "utf-8");
@@ -211,7 +198,7 @@ export async function getCachedRates() {
     console.error("Failed to read ratesCache.json", e);
   }
   
-    if (!memoryCache.success || memoryCache.usdtRubRaw === 0) {
+  if (!memoryCache.success || memoryCache.usdtRubRaw === 0) {
     console.log("[RATES] Cache empty, fetching synchronously...");
     await updateCache();
   }
