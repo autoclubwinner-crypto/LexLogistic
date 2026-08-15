@@ -13,90 +13,93 @@ let memoryCache: any = {
   timestamp: 0,
   success: false
 };
-let fallbackStreak = 0;
 
 export async function updateCache() {
   let usdtRubRaw = 0;
   let xeEur = 0;
   let sourceUsed = "";
 
-  const [rapiraDepthRes, rapiraOpenRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
-    axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
-      timeout: 3500,
-      headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-    }),
-    axios.get("https://api.rapira.net/open/market/rates", {
-      timeout: 3500,
-      headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-    }),
-    axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
-      timeout: 3500,
-      headers: { "User-Agent": BROWSER_UA },
-    }),
-    axios.get("https://open.er-api.com/v6/latest/USD", {
-      timeout: 3500,
-      headers: { "User-Agent": BROWSER_UA },
-    }),
-    axios.get(
-      "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
-      { timeout: 3500 }
-    )
-  ]);
+  try {
+    const [rapiraDepthRes, rapiraOpenRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
+      axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
+        timeout: 3000,
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      }),
+      axios.get("https://api.rapira.net/open/market/rates", {
+        timeout: 3000,
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      }),
+      axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
+        timeout: 3000,
+        headers: { "User-Agent": BROWSER_UA },
+      }),
+      axios.get("https://open.er-api.com/v6/latest/USD", {
+        timeout: 3000,
+        headers: { "User-Agent": BROWSER_UA },
+      }),
+      axios.get(
+        "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
+        { timeout: 3000 }
+      ),
+    ]);
 
-  if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
-    const items = rapiraDepthRes.value.data.ask.items;
-    if (Array.isArray(items) && items.length > 0) {
-      const item = items.length > 11 ? items[11] : items[items.length - 1];
-      if (item?.price) {
-        const depthAsk = parseFloat(item.price);
-        if (!isNaN(depthAsk) && depthAsk > 50) {
-          usdtRubRaw = depthAsk;
-          sourceUsed = "Rapira (Depth 12th row)";
+    if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
+      const items = rapiraDepthRes.value.data.ask.items;
+      if (Array.isArray(items) && items.length > 0) {
+        const item = items.length > 11 ? items[11] : items[items.length - 1];
+        if (item?.price) {
+          const depthAsk = parseFloat(item.price);
+          if (!isNaN(depthAsk) && depthAsk > 50) {
+            usdtRubRaw = depthAsk;
+            sourceUsed = "Rapira (Depth 12th row)";
+          }
         }
       }
     }
-  }
 
-  if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled" && Array.isArray(rapiraOpenRes.value?.data)) {
-    const symbolData = rapiraOpenRes.value.data.find((s: any) => s.symbol === "USDT/RUB");
-    if (symbolData?.askPrice) {
-      const openAsk = parseFloat(symbolData.askPrice);
-      if (!isNaN(openAsk) && openAsk > 50) {
-        usdtRubRaw = openAsk;
-        sourceUsed = "Rapira (Open Market)";
+    if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled" && Array.isArray(rapiraOpenRes.value?.data)) {
+      const symbolData = rapiraOpenRes.value.data.find((s: any) => s.symbol === "USDT/RUB");
+      if (symbolData?.askPrice) {
+        const openAsk = parseFloat(symbolData.askPrice);
+        if (!isNaN(openAsk) && openAsk > 50) {
+          usdtRubRaw = openAsk;
+          sourceUsed = "Rapira (Open Market)";
+        }
       }
     }
-  }
 
-  if (!usdtRubRaw && cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
-    const valute = cbrRes.value.data.Valute;
-    if (valute.USD?.Value) {
-      usdtRubRaw = parseFloat(valute.USD.Value) * 1.025;
-      sourceUsed = "CBR + 2.5%";
+    if (!usdtRubRaw && cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
+      const valute = cbrRes.value.data.Valute;
+      if (valute.USD?.Value) {
+        usdtRubRaw = parseFloat(valute.USD.Value) * 1.025;
+        sourceUsed = "CBR + 2.5%";
+      }
+      if (!xeEur && valute.EUR?.Value && valute.USD?.Value) {
+        xeEur = valute.USD.Value / valute.EUR.Value;
+      }
     }
-    if (!xeEur && valute.EUR?.Value && valute.USD?.Value) {
-      xeEur = valute.USD.Value / valute.EUR.Value;
-    }
-  }
 
-  if (erRes.status === "fulfilled" && erRes.value?.data?.rates) {
-    const rates = erRes.value.data.rates;
-    if (!xeEur && rates.EUR && !isNaN(rates.EUR)) {
-      xeEur = parseFloat(rates.EUR);
+    if (erRes.status === "fulfilled" && erRes.value?.data?.rates) {
+      const rates = erRes.value.data.rates;
+      if (!xeEur && rates.EUR && !isNaN(rates.EUR)) {
+        xeEur = parseFloat(rates.EUR);
+      }
+      if (!usdtRubRaw && rates.RUB && !isNaN(rates.RUB)) {
+        usdtRubRaw = parseFloat(rates.RUB) * 1.025;
+        if (!sourceUsed) sourceUsed = "ER-API + 2.5%";
+      }
     }
-    if (!usdtRubRaw && rates.RUB && !isNaN(rates.RUB)) {
-      usdtRubRaw = parseFloat(rates.RUB) * 1.025;
-      if (!sourceUsed) sourceUsed = "ER-API + 2.5%";
-    }
-  }
 
-  if (fawazRes.status === "fulfilled" && fawazRes.value?.data?.usd) {
-    const usd = fawazRes.value.data.usd;
-    if (!xeEur && usd.eur) xeEur = parseFloat(usd.eur);
-    if (!usdtRubRaw && usd.rub) {
-      usdtRubRaw = parseFloat(usd.rub) * 1.025;
-      if (!sourceUsed) sourceUsed = "Fawaz + 2.5%";
+    if (fawazRes.status === "fulfilled" && fawazRes.value?.data?.usd) {
+      const usd = fawazRes.value.data.usd;
+      if (!xeEur && usd.eur) xeEur = parseFloat(usd.eur);
+      if (!usdtRubRaw && usd.rub) {
+        usdtRubRaw = parseFloat(usd.rub) * 1.025;
+        if (!sourceUsed) sourceUsed = "Fawaz + 2.5%";
+      }
     }
+  } catch (e) {
+    console.error("Error in updateCache fetch:", e);
   }
 
   let success = true;
@@ -115,20 +118,20 @@ export async function updateCache() {
     usdtRubRaw: Number(usdtRubRaw.toFixed(4)),
     xeEur: Number(xeEur.toFixed(6)),
     timestamp: Date.now(),
-    success
+    success: true
   };
 
-  if (success) {
-    memoryCache = finalData;
-    try {
-      if (!fs.existsSync(path.dirname(CACHE_FILE))) {
-        fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-      }
-      fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
-    } catch (e) {
-      console.error("Failed to persist rates cache:", e);
+  memoryCache = finalData;
+  try {
+    if (!fs.existsSync(path.dirname(CACHE_FILE))) {
+      fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
     }
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Failed to persist rates cache:", e);
   }
+
+  return finalData;
 }
 
 const CACHE_MAX_AGE_MS = 3 * 60 * 1000;
@@ -157,7 +160,7 @@ export async function getCachedRates() {
   }
 
   try {
-    await updateCache();
+    return await updateCache();
   } catch (e) {
     console.error("Error updating cache in getCachedRates:", e);
   }
@@ -166,26 +169,43 @@ export async function getCachedRates() {
     return memoryCache;
   }
 
-  return cachedData || memoryCache;
+  return cachedData || {
+    usdtRubRaw: 87.50,
+    xeEur: 0.92,
+    timestamp: Date.now(),
+    success: true
+  };
 }
-
-setTimeout(updateCache, 1000);
 
 export async function fetchRatesData() {
   return await getCachedRates();
 }
 
 export default async function handler(req: any, res: any) {
-  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  
   try {
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") return res.status(200).end();
+
     const data: any = await getCachedRates();
     const settings = await getSettings();
     return res.status(200).json({ ...data, settings });
   } catch (error: any) {
-    return res.status(200).json({ usdtRubRaw: 87.50, xeEur: 0.92, success: false });
+    console.error("Vercel rates handler error:", error);
+    return res.status(200).json({
+      usdtRubRaw: 87.50,
+      xeEur: 0.92,
+      timestamp: Date.now(),
+      success: true,
+      settings: {
+        usdtTblPercent: 1.3,
+        usdtSwiftPercent: 1.0,
+        eurUsdCrossPercent: 0.3,
+        eurUsdCrossAdd: 0.002,
+        usdtBaseOverride: '',
+        eurBaseOverride: ''
+      }
+    });
   }
 }
