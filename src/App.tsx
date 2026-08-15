@@ -380,8 +380,8 @@ export default function App() {
             }
             
             if (directSuccess && usdtRubRaw > 0 && xeEur > 0) {
-              isStale = true;
-              lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + " (Direct)";
+              isStale = false;
+              lastCheckedTime = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
               fetchSuccess = true; // Mark as success so we don't fall back to 95.50
             } else {
               throw new Error("Direct fetch failed");
