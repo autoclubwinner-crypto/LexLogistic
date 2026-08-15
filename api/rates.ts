@@ -1,85 +1,92 @@
+import { getSettings } from "./settings";
 import axios from "axios";
+import fs from "fs";
+import path from "path";
 
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const IS_VERCEL = process.env.VERCEL === "1";
+const CACHE_FILE = IS_VERCEL ? "/tmp/ratesCache.json" : path.join(process.cwd(), ".data", "ratesCache.json");
 
-export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: number; success: boolean }> {
+let memoryCache: any = {
+  usdtRubRaw: 0,
+  xeEur: 0,
+  success: false
+};
+let fallbackStreak = 0;
+
+export async function updateCache() {
   let usdtRubRaw = 0;
   let xeEur = 0;
+  let sourceUsed = "";
 
-  // Параллельный опрос всех основных и альтернативных источников (Таймаут 3.5 сек)
-  const [rapiraRes, garantexRes, cbrRes, erRes, fawazRes, bybitRes] = await Promise.allSettled([
+  const [rapiraDepthRes, rapiraOpenRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
+    // 1. Original Rapira (Depth)
     axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
       timeout: 3500,
       headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
     }),
-    axios.get("https://garantex.org/api/v2/depth?market=usdtrub", {
+    // 2. Rapira Open Market Rates
+    axios.get("https://api.rapira.net/open/market/rates", {
       timeout: 3500,
       headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
     }),
+    // 3. CBR
     axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
       timeout: 3500,
       headers: { "User-Agent": BROWSER_UA },
     }),
+    // 4. ER-API
     axios.get("https://open.er-api.com/v6/latest/USD", {
       timeout: 3500,
       headers: { "User-Agent": BROWSER_UA },
     }),
+    // 5. Fawaz
     axios.get(
       "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
       { timeout: 3500 }
     ),
-    axios.post("https://api2.bybit.com/fiat/otc/item/online", {
-      userId: "", tokenId: "USDT", currencyId: "RUB", payment: [], side: "1", size: "10", page: "1", amount: "50000", authMaker: false, canTrade: false
-    }, {
-      timeout: 3500,
-      headers: { "User-Agent": BROWSER_UA, "Content-Type": "application/json" }
-    })
   ]);
 
-  // 1. Источник: Rapira API
-  if (rapiraRes.status === "fulfilled" && rapiraRes.value?.data?.ask?.items) {
-    const items = rapiraRes.value.data.ask.items;
+  // 1. Rapira API (Depth)
+  if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
+    const items = rapiraDepthRes.value.data.ask.items;
     if (Array.isArray(items) && items.length > 0) {
       const item = items.length > 11 ? items[11] : items[items.length - 1];
       if (item?.price) {
-        const val = parseFloat(item.price);
-        if (!isNaN(val) && val > 0) usdtRubRaw = val;
+        const depthAsk = parseFloat(item.price);
+        if (!isNaN(depthAsk) && depthAsk > 50) {
+          usdtRubRaw = depthAsk;
+          sourceUsed = "Rapira (Depth 12th row)";
+        }
       }
     }
   }
 
-  // 1.5 Источник: Bybit P2P (как замена если Рапира упала)
-  if (!usdtRubRaw && bybitRes.status === "fulfilled" && bybitRes.value?.data?.result?.items) {
-    const items = bybitRes.value.data.result.items;
-    if (Array.isArray(items) && items.length > 0 && items[0]?.price) {
-      const val = parseFloat(items[0].price);
-      if (!isNaN(val) && val > 0) usdtRubRaw = val;
+  // 2. Rapira Open Market Rates
+  if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled" && Array.isArray(rapiraOpenRes.value?.data)) {
+    const symbolData = rapiraOpenRes.value.data.find((s: any) => s.symbol === "USDT/RUB");
+    if (symbolData?.askPrice) {
+      const openAsk = parseFloat(symbolData.askPrice);
+      if (!isNaN(openAsk) && openAsk > 50) {
+        usdtRubRaw = openAsk;
+        sourceUsed = "Rapira (Open Market)";
+      }
     }
   }
 
-  // 2. Источник: Garantex API (приоритет над Rapira при наличии)
-  if (garantexRes.status === "fulfilled" && garantexRes.value?.data?.asks) {
-    const asks = garantexRes.value.data.asks;
-    if (Array.isArray(asks) && asks.length > 0 && asks[0]?.price) {
-      const val = parseFloat(asks[0].price);
-      if (!isNaN(val) && val > 0) usdtRubRaw = val;
-    }
-  }
-
-  // 3. Альтернативный источник: Центробанк РФ (CBR API) + P2P Маржа
+  // 3. CBR
   if (!usdtRubRaw && cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
     const valute = cbrRes.value.data.Valute;
     if (valute.USD?.Value) {
-      // Курс ЦБ РФ + ~2.5% средняя наценка USDT P2P
       usdtRubRaw = parseFloat(valute.USD.Value) * 1.025;
+      sourceUsed = "CBR + 2.5%";
     }
     if (!xeEur && valute.EUR?.Value && valute.USD?.Value) {
       xeEur = valute.USD.Value / valute.EUR.Value;
     }
   }
 
-  // 4. Альтернативный источник: Open ExchangeRate-API
+  // 4. ER-API
   if (erRes.status === "fulfilled" && erRes.value?.data?.rates) {
     const rates = erRes.value.data.rates;
     if (!xeEur && rates.EUR && !isNaN(rates.EUR)) {
@@ -87,47 +94,126 @@ export async function fetchRatesData(): Promise<{ usdtRubRaw: number; xeEur: num
     }
     if (!usdtRubRaw && rates.RUB && !isNaN(rates.RUB)) {
       usdtRubRaw = parseFloat(rates.RUB) * 1.025;
+      if (!sourceUsed) sourceUsed = "ER-API + 2.5%";
     }
   }
 
-  // 5. Альтернативный источник: FawazAhmed CDN API
+  // 5. Fawaz
   if (fawazRes.status === "fulfilled" && fawazRes.value?.data?.usd) {
     const usd = fawazRes.value.data.usd;
     if (!xeEur && usd.eur) xeEur = parseFloat(usd.eur);
-    if (!usdtRubRaw && usd.rub) usdtRubRaw = parseFloat(usd.rub) * 1.025;
+    if (!usdtRubRaw && usd.rub) {
+      usdtRubRaw = parseFloat(usd.rub) * 1.025;
+      if (!sourceUsed) sourceUsed = "Fawaz + 2.5%";
+    }
   }
 
   let success = true;
-  // 6. Гарантированный безопасный фоллбэк (Никогда не отдавать 0 или NaN)
-  if (!usdtRubRaw || isNaN(usdtRubRaw) || usdtRubRaw <= 0) {
-    usdtRubRaw = 95.50;
-    success = false;
+
+  // Track fallbacks
+  if (sourceUsed.includes("CBR") || sourceUsed.includes("ER-API") || sourceUsed.includes("Fawaz")) {
+    fallbackStreak++;
+    if (fallbackStreak >= 2) {
+      console.error(`[ALERT] High-quality sources failing! Fallback streak: ${fallbackStreak}. Current source: ${sourceUsed}`);
+    }
+  } else if (sourceUsed === "") {
+    fallbackStreak++;
+    console.error(`[ALERT] ALL SOURCES FAILED! Fallback streak: ${fallbackStreak}`);
+  } else {
+    fallbackStreak = 0; // reset
   }
-  if (!xeEur || isNaN(xeEur) || xeEur <= 0) {
-    xeEur = 0.92;
+  
+  if (sourceUsed) {
+    console.log(`[RATES] Successfully fetched rates using: ${sourceUsed}`);
+  }
+
+  // 6. Hard fallback (using last known good from memory or static)
+  if (!usdtRubRaw || isNaN(usdtRubRaw) || usdtRubRaw <= 0) {
+    usdtRubRaw = memoryCache.usdtRubRaw || 87.50;
     success = false;
   }
 
-  return {
+  if (!xeEur || isNaN(xeEur) || xeEur <= 0) {
+    xeEur = memoryCache.xeEur || 0.92;
+    success = false;
+  }
+
+  const finalData = {
     usdtRubRaw: Number(usdtRubRaw.toFixed(4)),
     xeEur: Number(xeEur.toFixed(6)),
     success
   };
+
+  if (success) {
+    memoryCache = finalData;
+    // Persist to file/KV
+    try {
+      if (!fs.existsSync(path.dirname(CACHE_FILE))) {
+        fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+      }
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
+      
+      if (process.env.KV_REST_API_URL) {
+        try {
+          const { kv } = await import("@vercel/kv");
+          await kv.set("ratesCache", finalData);
+        } catch (e) {
+          console.error("Failed to write to KV:", e);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to persist rates cache:", e);
+    }
+  }
 }
 
-export default async function handler(req: any, res: any) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
+export async function getCachedRates() {
+  if (process.env.KV_REST_API_URL) {
+    try {
+      const { kv } = await import("@vercel/kv");
+      const data = await kv.get("ratesCache");
+      if (data) return data;
+    } catch (e) {
+      console.error("Failed to read rates from KV", e);
+    }
   }
 
   try {
-    const data = await fetchRatesData();
-    return res.status(200).json(data);
+    if (fs.existsSync(CACHE_FILE)) {
+      const data = fs.readFileSync(CACHE_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error("Failed to read ratesCache.json", e);
+  }
+  
+  if (!memoryCache.success || memoryCache.usdtRubRaw === 0) {
+    console.log("[RATES] Cache empty, fetching synchronously...");
+    await updateCache();
+  }
+  
+  return memoryCache;
+}
+
+// Ensure first fetch runs immediately
+setTimeout(updateCache, 1000);
+
+export async function fetchRatesData() {
+  return await getCachedRates();
+}
+
+// For direct vercel endpoint routing if needed
+export default async function handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  
+  try {
+    const data: any = await getCachedRates();
+    const settings = await getSettings();
+    return res.status(200).json({ ...data, settings });
   } catch (error: any) {
-    return res.status(200).json({ usdtRubRaw: 95.50, xeEur: 0.92, success: false });
+    return res.status(200).json({ usdtRubRaw: 87.50, xeEur: 0.92, success: false });
   }
 }
