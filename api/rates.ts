@@ -13,6 +13,7 @@ let memoryCache: any = {
   timestamp: 0,
   success: false
 };
+let fallbackStreak = 0;
 
 export async function updateCache() {
   let usdtRubRaw = 0;
@@ -21,28 +22,34 @@ export async function updateCache() {
 
   try {
     const [rapiraDepthRes, rapiraOpenRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
+      // 1. Original Rapira (Depth)
       axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
       }),
+      // 2. Rapira Open Market Rates
       axios.get("https://api.rapira.net/open/market/rates", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
       }),
+      // 3. CBR
       axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
+      // 4. ER-API
       axios.get("https://open.er-api.com/v6/latest/USD", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
+      // 5. Fawaz
       axios.get(
         "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
         { timeout: 3000 }
       ),
     ]);
 
+    // 1. Rapira API (Depth)
     if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
       const items = rapiraDepthRes.value.data.ask.items;
       if (Array.isArray(items) && items.length > 0) {
@@ -57,6 +64,7 @@ export async function updateCache() {
       }
     }
 
+    // 2. Rapira Open Market Rates
     if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled" && Array.isArray(rapiraOpenRes.value?.data)) {
       const symbolData = rapiraOpenRes.value.data.find((s: any) => s.symbol === "USDT/RUB");
       if (symbolData?.askPrice) {
@@ -68,6 +76,7 @@ export async function updateCache() {
       }
     }
 
+    // 3. CBR
     if (!usdtRubRaw && cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
       const valute = cbrRes.value.data.Valute;
       if (valute.USD?.Value) {
@@ -79,6 +88,7 @@ export async function updateCache() {
       }
     }
 
+    // 4. ER-API
     if (erRes.status === "fulfilled" && erRes.value?.data?.rates) {
       const rates = erRes.value.data.rates;
       if (!xeEur && rates.EUR && !isNaN(rates.EUR)) {
@@ -90,6 +100,7 @@ export async function updateCache() {
       }
     }
 
+    // 5. Fawaz
     if (fawazRes.status === "fulfilled" && fawazRes.value?.data?.usd) {
       const usd = fawazRes.value.data.usd;
       if (!xeEur && usd.eur) xeEur = parseFloat(usd.eur);
@@ -134,7 +145,7 @@ export async function updateCache() {
   return finalData;
 }
 
-const CACHE_MAX_AGE_MS = 3 * 60 * 1000;
+const CACHE_MAX_AGE_MS = 3 * 60 * 1000; // 3 minutes
 
 export async function getCachedRates() {
   let cachedData: any = null;
@@ -181,6 +192,7 @@ export async function fetchRatesData() {
   return await getCachedRates();
 }
 
+// Handler for Vercel Serverless Function /api/rates
 export default async function handler(req: any, res: any) {
   try {
     res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
@@ -209,3 +221,4 @@ export default async function handler(req: any, res: any) {
     });
   }
 }
+
