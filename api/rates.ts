@@ -141,58 +141,60 @@ export async function updateCache() {
   const finalData = {
     usdtRubRaw: Number(usdtRubRaw.toFixed(4)),
     xeEur: Number(xeEur.toFixed(6)),
+    timestamp: Date.now(),
     success
   };
 
   if (success) {
     memoryCache = finalData;
-    // Persist to file/KV
+    // Persist to file
     try {
       if (!fs.existsSync(path.dirname(CACHE_FILE))) {
         fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
       }
       fs.writeFileSync(CACHE_FILE, JSON.stringify(finalData, null, 2), "utf-8");
-      
-      if (process.env.KV_REST_API_URL) {
-        try {
-          const { kv } = await import("@vercel/kv");
-          await kv.set("ratesCache", finalData);
-        } catch (e) {
-          console.error("Failed to write to KV:", e);
-        }
-      }
     } catch (e) {
       console.error("Failed to persist rates cache:", e);
     }
   }
 }
 
+const CACHE_MAX_AGE_MS = 3 * 60 * 1000; // 3 minutes
+
 export async function getCachedRates() {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      const { kv } = await import("@vercel/kv");
-      const data = await kv.get("ratesCache");
-      if (data) return data;
-    } catch (e) {
-      console.error("Failed to read rates from KV", e);
-    }
-  }
+  let cachedData: any = null;
 
   try {
     if (fs.existsSync(CACHE_FILE)) {
       const data = fs.readFileSync(CACHE_FILE, "utf-8");
-      return JSON.parse(data);
+      cachedData = JSON.parse(data);
     }
   } catch (e) {
     console.error("Failed to read ratesCache.json", e);
   }
-  
-  if (!memoryCache.success || memoryCache.usdtRubRaw === 0) {
-    console.log("[RATES] Cache empty, fetching synchronously...");
-    await updateCache();
+
+  const now = Date.now();
+  const isFresh = cachedData &&
+    cachedData.success &&
+    cachedData.usdtRubRaw > 80 &&
+    cachedData.timestamp &&
+    (now - cachedData.timestamp < CACHE_MAX_AGE_MS);
+
+  if (isFresh) {
+    return cachedData;
   }
-  
-  return memoryCache;
+
+  try {
+    await updateCache();
+  } catch (e) {
+    console.error("Error updating cache in getCachedRates:", e);
+  }
+
+  if (memoryCache && memoryCache.usdtRubRaw > 80) {
+    return memoryCache;
+  }
+
+  return cachedData || memoryCache;
 }
 
 // Ensure first fetch runs immediately
