@@ -23,15 +23,6 @@ const defaultSettings: AdminSettings = {
 };
 
 export async function getSettings(): Promise<AdminSettings> {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      const { kv } = await import("@vercel/kv");
-      const data = await kv.get("adminSettings");
-      if (data) return data as AdminSettings;
-    } catch (e) {
-      console.error("Failed to read from KV", e);
-    }
-  }
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
@@ -45,14 +36,6 @@ export async function getSettings(): Promise<AdminSettings> {
 }
 
 export async function saveSettings(settings: AdminSettings): Promise<void> {
-  if (process.env.KV_REST_API_URL) {
-    try {
-      const { kv } = await import("@vercel/kv");
-      await kv.set("adminSettings", settings);
-    } catch (e) {
-      console.error("Failed to write to KV", e);
-    }
-  }
   try {
     if (!fs.existsSync(path.dirname(SETTINGS_FILE))) {
       fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
