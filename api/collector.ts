@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { kvGet, kvSet } from './lib/upstash';
 import { getSettings } from './settings';
 import type { AdminSettings } from './settings';
@@ -134,14 +133,14 @@ export async function updateCache() {
   return payload;
 }
 
-function isAuthorized(req: VercelRequest): boolean {
+function isAuthorized(req: any): boolean {
   const bearer = req.headers.authorization;
   if (bearer && process.env.CRON_SECRET && bearer === `Bearer ${process.env.CRON_SECRET}`) return true;
   if (req.headers['x-collector-secret'] === process.env.COLLECTOR_SECRET) return true;
   return false;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (!isAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   const result = await updateCache();
   return res.status(200).json(result);
