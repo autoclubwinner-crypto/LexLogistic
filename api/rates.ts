@@ -21,7 +21,7 @@ export async function updateCache() {
   let sourceUsed = "";
 
   try {
-    const [rapiraDepthRes, rapiraOpenRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
+    const [rapiraDepthRes, rapiraOpenRes, bybitRes, cbrRes, erRes, fawazRes] = await Promise.allSettled([
       // 1. Original Rapira (Depth)
       axios.get("https://api.rapira.net/market/exchange-plate-mini?symbol=USDT/RUB", {
         timeout: 3000,
@@ -32,17 +32,21 @@ export async function updateCache() {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
       }),
-      // 3. CBR
+      // 3. Bybit P2P OTC API (works well on Vercel as a crypto alternative)
+      axios.post("https://api2.bybit.com/fiat/otc/item/online", {
+        userId: "", tokenId: "USDT", currencyId: "RUB", payment: [], side: "1", size: "10", page: "1", amount: "50000"
+      }, { timeout: 3500 }),
+      // 4. CBR
       axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
-      // 4. ER-API
+      // 5. ER-API
       axios.get("https://open.er-api.com/v6/latest/USD", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
-      // 5. Fawaz
+      // 6. Fawaz
       axios.get(
         "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
         { timeout: 3000 }
@@ -78,7 +82,19 @@ export async function updateCache() {
       }
     }
 
-    // 3. CBR
+    // 3. Bybit P2P (Working Vercel Alternative)
+    if (!usdtRubRaw && bybitRes.status === "fulfilled" && bybitRes.value?.data?.result?.items) {
+       const items = bybitRes.value.data.result.items;
+       if (items.length > 0 && items[0].price) {
+          const bybitPrice = parseFloat(items[0].price);
+          if (!isNaN(bybitPrice) && bybitPrice > 50) {
+             usdtRubRaw = bybitPrice;
+             sourceUsed = "Bybit P2P";
+          }
+       }
+    }
+
+    // 4. CBR
     if (!usdtRubRaw && cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
       const valute = cbrRes.value.data.Valute;
       if (valute.USD?.Value) {
