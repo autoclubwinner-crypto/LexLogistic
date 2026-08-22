@@ -2,6 +2,10 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/api/collector",
+      "destination": "/api/collector"
+    },
+    {
       "source": "/api/rates",
       "destination": "/api/rates"
     },
@@ -16,6 +20,12 @@
     {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/collector",
+      "schedule": "0 3 * * *"
     }
   ]
 }
