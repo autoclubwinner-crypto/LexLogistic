@@ -1,8 +1,4 @@
-import fs from "fs";
-import path from "path";
-
-const IS_VERCEL = process.env.VERCEL === "1";
-const SETTINGS_FILE = IS_VERCEL ? "/tmp/settings.json" : path.join(process.cwd(), ".data", "settings.json");
+import { kvGet, kvSet } from "./lib/upstash";
 
 export interface AdminSettings {
   usdtTblPercent: number;
@@ -23,26 +19,13 @@ const defaultSettings: AdminSettings = {
 };
 
 export async function getSettings(): Promise<AdminSettings> {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.error("Failed to read settings.json", e);
-  }
-  
-  return defaultSettings;
+  const settings = await kvGet<AdminSettings>('rex:settings');
+  return settings ?? defaultSettings;
 }
 
 export async function saveSettings(settings: AdminSettings): Promise<void> {
-  try {
-    if (!fs.existsSync(path.dirname(SETTINGS_FILE))) {
-      fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-    }
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to write settings.json", e);
-  }
+  const current = await getSettings();
+  const next = { ...current, ...settings };
+  await kvSet('rex:settings', next);
 }
 
