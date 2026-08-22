@@ -65,10 +65,12 @@ export async function updateCache() {
     }
 
     // 2. Rapira Open Market Rates
-    if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled" && Array.isArray(rapiraOpenRes.value?.data)) {
-      const symbolData = rapiraOpenRes.value.data.find((s: any) => s.symbol === "USDT/RUB");
-      if (symbolData?.askPrice) {
-        const openAsk = parseFloat(symbolData.askPrice);
+    if (!usdtRubRaw && rapiraOpenRes.status === "fulfilled") {
+      const rawData = rapiraOpenRes.value?.data;
+      const list = Array.isArray(rawData) ? rawData : (Array.isArray(rawData?.data) ? rawData.data : []);
+      const symbolData = list.find((s: any) => s.symbol === "USDT/RUB");
+      if (symbolData) {
+        const openAsk = parseFloat(symbolData.askPrice || symbolData.close || symbolData.last);
         if (!isNaN(openAsk) && openAsk > 50) {
           usdtRubRaw = openAsk;
           sourceUsed = "Rapira (Open Market)";
