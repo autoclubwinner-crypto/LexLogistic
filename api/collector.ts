@@ -21,7 +21,12 @@ export async function updateCache() {
   }
 
   try {
-    const [rapiraOpenRes, rapiraDepthRes, bybitRes, cbrRes, erRes] = await Promise.allSettled([
+    const [
+      rapiraOpenRes, rapiraDepthRes, htxRes,
+      coinbaseRes, paprikaRes, fawazRes,
+      cbrRes, erRes
+    ] = await Promise.allSettled([
+      // 1. Rapira
       axios.get("https://api.rapira.net/open/market/rates", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
@@ -30,13 +35,28 @@ export async function updateCache() {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
       }),
-      axios.post("https://api2.bybit.com/fiat/otc/item/online", {
-        userId: "", tokenId: "USDT", currencyId: "RUB", payment: [], side: "1", size: "10", page: "1", amount: "50000"
-      }, { timeout: 3500 }),
+      // 2. HTX P2P (без Cloudflare)
+      axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", {
+        timeout: 3500,
+      }),
+      // 3. Coinbase Exchange Rates
+      axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", {
+        timeout: 3000,
+      }),
+      // 4. CoinPaprika
+      axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", {
+        timeout: 3000,
+      }),
+      // 5. Fawaz (jsDelivr)
+      axios.get("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usdt.json", {
+        timeout: 3000,
+      }),
+      // 6. CBR (ЦБ РФ)
       axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
+      // 7. ER-API
       axios.get("https://open.er-api.com/v6/latest/USD", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
@@ -72,19 +92,46 @@ export async function updateCache() {
       }
     }
 
-    // 3. Bybit P2P
-    if (!usdtRubRaw && bybitRes.status === "fulfilled" && bybitRes.value?.data?.result?.items) {
-      const items = bybitRes.value.data.result.items;
-      if (items.length > 0 && items[0].price) {
-        const bybitPrice = parseFloat(items[0].price);
-        if (!isNaN(bybitPrice) && bybitPrice > 50) {
-          usdtRubRaw = bybitPrice;
-          sourceUsed = "Bybit P2P";
+    // 3. HTX P2P
+    if (!usdtRubRaw && htxRes.status === "fulfilled" && htxRes.value?.data?.data) {
+      const items = htxRes.value.data.data;
+      if (Array.isArray(items) && items.length > 0 && items[0].price) {
+        const htxPrice = parseFloat(items[0].price);
+        if (!isNaN(htxPrice) && htxPrice > 50) {
+          usdtRubRaw = htxPrice;
+          sourceUsed = "HTX P2P";
         }
       }
     }
 
-    // 4. CBR / Форекс
+    // 4. Coinbase
+    if (!usdtRubRaw && coinbaseRes.status === "fulfilled" && coinbaseRes.value?.data?.data?.rates?.RUB) {
+      const cbPrice = parseFloat(coinbaseRes.value.data.data.rates.RUB);
+      if (!isNaN(cbPrice) && cbPrice > 50) {
+        usdtRubRaw = cbPrice;
+        sourceUsed = "Coinbase";
+      }
+    }
+
+    // 5. CoinPaprika
+    if (!usdtRubRaw && paprikaRes.status === "fulfilled" && paprikaRes.value?.data?.quotes?.RUB?.price) {
+      const cpPrice = parseFloat(paprikaRes.value.data.quotes.RUB.price);
+      if (!isNaN(cpPrice) && cpPrice > 50) {
+        usdtRubRaw = cpPrice;
+        sourceUsed = "CoinPaprika";
+      }
+    }
+
+    // 6. Fawaz Currency API
+    if (!usdtRubRaw && fawazRes.status === "fulfilled" && fawazRes.value?.data?.usdt?.rub) {
+      const fzPrice = parseFloat(fawazRes.value.data.usdt.rub);
+      if (!isNaN(fzPrice) && fzPrice > 50) {
+        usdtRubRaw = fzPrice;
+        sourceUsed = "Fawaz Currency API";
+      }
+    }
+
+    // 7. CBR / Форекс
     let valute: any = null;
     if (cbrRes.status === "fulfilled" && cbrRes.value?.data?.Valute) {
       valute = cbrRes.value.data.Valute;
