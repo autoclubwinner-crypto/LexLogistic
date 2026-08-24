@@ -3,9 +3,9 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 // @ts-ignore
 import cookieParser from "cookie-parser";
-import { fetchRatesData, getCachedRates, updateCache } from "./rates";
-import { fetchNewsData } from "./news";
-import { getSettings, saveSettings } from "./settings";
+import { fetchRatesData, getCachedRates, updateCache } from "./rates.js";
+import { fetchNewsData } from "./news.js";
+import { getSettings, saveSettings } from "./settings.js";
 // @ts-ignore
 import jwt from "jsonwebtoken";
 

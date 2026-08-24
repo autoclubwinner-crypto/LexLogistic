@@ -1,6 +1,6 @@
-import { kvGet, kvSet } from './lib/upstash';
-import { getSettings } from './settings';
-import type { AdminSettings } from './settings';
+import { kvGet, kvSet } from './lib/upstash.js';
+import { getSettings } from './settings.js';
+import type { AdminSettings } from './settings.js';
 import axios from 'axios';
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -26,7 +26,6 @@ export async function updateCache() {
       coinbaseRes, paprikaRes, fawazRes,
       cbrRes, erRes
     ] = await Promise.allSettled([
-      // 1. Rapira
       axios.get("https://api.rapira.net/open/market/rates", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
@@ -35,28 +34,22 @@ export async function updateCache() {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
       }),
-      // 2. HTX P2P (без Cloudflare)
       axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", {
         timeout: 3500,
       }),
-      // 3. Coinbase Exchange Rates
       axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", {
         timeout: 3000,
       }),
-      // 4. CoinPaprika
       axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", {
         timeout: 3000,
       }),
-      // 5. Fawaz (jsDelivr)
       axios.get("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usdt.json", {
         timeout: 3000,
       }),
-      // 6. CBR (ЦБ РФ)
       axios.get("https://www.cbr-xml-daily.ru/daily_json.js", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },
       }),
-      // 7. ER-API
       axios.get("https://open.er-api.com/v6/latest/USD", {
         timeout: 3000,
         headers: { "User-Agent": BROWSER_UA },

@@ -1,6 +1,6 @@
-import { kvGet } from "./lib/upstash";
-import { getSettings } from "./settings";
-import { updateCache as runCollector } from "./collector";
+import { kvGet } from "./lib/upstash.js";
+import { getSettings } from "./settings.js";
+import { updateCache as runCollector } from "./collector.js";
 
 export async function getCachedRates() {
   const cachedData = await kvGet<any>('rex:rates:latest');
@@ -35,4 +35,3 @@ export default async function handler(req: any, res: any) {
   const settings = await getSettings();
   return res.status(200).json({ ...data, settings });
 }
-

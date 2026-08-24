@@ -1,4 +1,4 @@
-import { kvGet, kvSet } from "./lib/upstash";
+import { kvGet, kvSet } from "./lib/upstash.js";
 
 export interface AdminSettings {
   usdtTblPercent: number;
