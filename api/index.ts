@@ -131,7 +131,7 @@ export async function updateCache() {
       cbrRes, erRes
     ] = await Promise.allSettled([
       axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
-      axios.get("https://api.rapira.net/open/market/rates", { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
+      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev", { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
       axios.postForm("https://api.rapira.net/market/exchange-plate-mini", { symbol: "USDT/RUB" }, { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
       axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
       axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
