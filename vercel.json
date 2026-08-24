@@ -2,18 +2,6 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/collector",
-      "destination": "/api/collector"
-    },
-    {
-      "source": "/api/rates",
-      "destination": "/api/rates"
-    },
-    {
-      "source": "/api/news",
-      "destination": "/api/news"
-    },
-    {
       "source": "/api/(.*)",
       "destination": "/api"
     },
