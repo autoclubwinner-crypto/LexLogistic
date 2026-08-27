@@ -13,20 +13,15 @@ import axios from "axios";
 const BASE_URL = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// Резервная память для AI Studio
 const localCache = new Map<string, string>();
 
 async function command<T = unknown>(cmd: (string | number)[]): Promise<T> {
   if (!BASE_URL || !TOKEN) {
     const action = cmd[0];
     const key = String(cmd[1]);
-    if (action === 'GET') {
-      const val = localCache.get(key);
-      return (val ? val : null) as T;
-    }
+    if (action === 'GET') return (localCache.get(key) || null) as T;
     if (action === 'SET') {
-      const value = String(cmd[2]);
-      localCache.set(key, value);
+      localCache.set(key, String(cmd[2]));
       return 'OK' as T;
     }
     return null as any;
@@ -44,8 +39,7 @@ async function command<T = unknown>(cmd: (string | number)[]): Promise<T> {
 export async function kvGet<T>(key: string): Promise<T | null> {
   try {
     const raw = await command<string | null>(['GET', key]);
-    if (!raw) return null;
-    return JSON.parse(raw) as T;
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch (e) {
     return null;
   }
@@ -87,8 +81,7 @@ export async function getSettings(): Promise<AdminSettings> {
 
 export async function saveSettings(settings: AdminSettings): Promise<void> {
   const current = await getSettings();
-  const next = { ...current, ...settings };
-  await kvSet('rex:settings', next);
+  await kvSet('rex:settings', { ...current, ...settings });
 }
 
 // ==========================================
@@ -106,17 +99,15 @@ export async function updateCache() {
     usdtRubRaw = parseFloat(settings.usdtBaseOverride);
     sourceUsed = "manual-override";
   }
-
   if (settings.eurBaseOverride && !isNaN(parseFloat(settings.eurBaseOverride))) {
     xeEur = parseFloat(settings.eurBaseOverride);
   }
 
-  // Payload: собираем все источники
   const sourcesMap: Record<string, number | null> = {
-    htx: null,
-    rapiraOpen: null,
     rapiraDepth: null,
+    rapiraOpen: null,
     bybitSpot: null,
+    htx: null,
     coinbase: null,
     coinpaprika: null,
     fawaz: null,
@@ -124,15 +115,24 @@ export async function updateCache() {
     erApiPlus: null
   };
 
+  let rapiraDepthMeta: any = null;
+
   try {
+    const workerHeaders: Record<string, string> = {
+      "User-Agent": BROWSER_UA,
+      "Accept": "application/json"
+    };
+    if (process.env.WORKER_SECRET) {
+      workerHeaders["x-worker-secret"] = process.env.WORKER_SECRET;
+    }
+
     const [
       htxRes, rapiraOpenRes, rapiraDepthRes, bybitRes,
-      coinbaseRes, paprikaRes, fawazRes,
-      cbrRes, erRes
+      coinbaseRes, paprikaRes, fawazRes, cbrRes, erRes
     ] = await Promise.allSettled([
       axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
-      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
-      axios.postForm("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", { symbol: "USDT/RUB" }, { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
+      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: workerHeaders }),
+      axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", {}, { timeout: 4000, headers: workerHeaders }),
       axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
       axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
       axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", { timeout: 4000 }),
@@ -141,12 +141,42 @@ export async function updateCache() {
       axios.get("https://open.er-api.com/v6/latest/USD", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } })
     ]);
 
-    // Записываем все успешные ответы в карту (sourcesMap)
-    if (htxRes.status === "fulfilled" && htxRes.value?.data?.data) {
-      const items = htxRes.value.data.data;
-      if (Array.isArray(items) && items.length > 0 && items[0].price) {
-        const p = parseFloat(items[0].price);
-        if (!isNaN(p) && p > 50) sourcesMap.htx = p;
+    const parseDepthBook = (data: any) => {
+      if (!data?.ask?.items || !Array.isArray(data.ask.items)) return null;
+      let sorted = data.ask.items
+        .map((i: any) => parseFloat(i.price))
+        .filter((p: number) => !isNaN(p) && p > 50)
+        .sort((a: number, b: number) => a - b);
+        
+      if (sorted.length === 0) return null;
+      
+      let n = sorted.length;
+      let bestAsk = sorted[0];
+      let top1 = sorted[n - 1];
+      let top2 = n > 1 ? sorted[n - 2] : top1;
+      let pickedIndexFromEnd = Math.min(3, n);
+      let picked = sorted[n - pickedIndexFromEnd];
+      
+      return { n, bestAsk, top1, top2, top3: picked, pickedIndexFromEnd };
+    };
+
+    if (rapiraDepthRes.status === "fulfilled") {
+      let meta = parseDepthBook(rapiraDepthRes.value?.data);
+      
+      // Fallback: Если мини-стакан урезан - запрашиваем полный
+      if (meta && (meta.n < 8 || (meta.top1 - meta.bestAsk) < 0.5)) {
+        try {
+          const fullRes = await axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth-full", {}, { timeout: 4000, headers: workerHeaders });
+          const fullMeta = parseDepthBook(fullRes.data);
+          if (fullMeta) meta = fullMeta;
+        } catch (e) {
+          // Игнорируем ошибку, продолжаем с mini-стаканом
+        }
+      }
+
+      if (meta) {
+        sourcesMap.rapiraDepth = meta.top3;
+        rapiraDepthMeta = meta;
       }
     }
 
@@ -160,24 +190,18 @@ export async function updateCache() {
       }
     }
 
-    if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
-      const items = rapiraDepthRes.value.data.ask.items;
-      if (Array.isArray(items) && items.length > 0) {
-        // Берем 3-ю строчку СВЕРХУ из красного стакана (3-я максимальная цена)
-        // API отдает массив от меньшего к большему, поэтому отнимаем 3 с конца
-        const targetIndex = Math.max(0, items.length - 3);
-        const item = items[targetIndex];
-        if (item?.price) {
-          const p = parseFloat(item.price);
-          if (!isNaN(p) && p > 50) sourcesMap.rapiraDepth = p;
-        }
-      }
-    }
-
     if (bybitRes.status === "fulfilled" && bybitRes.value?.data?.retCode === 0 && bybitRes.value?.data?.result?.list?.length > 0) {
       const ticker = bybitRes.value.data.result.list[0];
       const p = parseFloat(ticker.ask1Price || ticker.lastPrice);
       if (!isNaN(p) && p > 50) sourcesMap.bybitSpot = p;
+    }
+
+    if (htxRes.status === "fulfilled" && htxRes.value?.data?.data) {
+      const items = htxRes.value.data.data;
+      if (Array.isArray(items) && items.length > 0 && items[0].price) {
+        const p = parseFloat(items[0].price);
+        if (!isNaN(p) && p > 50) sourcesMap.htx = p;
+      }
     }
 
     if (coinbaseRes.status === "fulfilled" && coinbaseRes.value?.data?.data?.rates?.RUB) {
@@ -217,10 +241,10 @@ export async function updateCache() {
       }
     }
   } catch (e) {
-    // Игнорируем глобальные ошибки
+    // Ignore global errors
   }
 
-  // Явный приоритет выбора финального курса
+  // Приоритет выбора финального курса
   if (!usdtRubRaw) {
     if (sourcesMap.rapiraDepth && sourcesMap.rapiraDepth > 50) {
       usdtRubRaw = sourcesMap.rapiraDepth;
@@ -259,10 +283,10 @@ export async function updateCache() {
   }
   
   if (!xeEur || isNaN(xeEur) || xeEur <= 0) {
-    xeEur = 0.856; // Не ломаем общий success, если отвалился только кросс-курс EUR, USDT важнее
+    xeEur = 0.856; 
   }
 
-  const payload = {
+  const payload: any = {
     usdtRubRaw: Number(usdtRubRaw.toFixed(4)),
     xeEur: Number(xeEur.toFixed(6)),
     timestamp: Date.now(),
@@ -271,16 +295,17 @@ export async function updateCache() {
     sources: sourcesMap
   };
 
+  if (rapiraDepthMeta) {
+    payload.rapiraDepthMeta = rapiraDepthMeta;
+  }
+
   await kvSet('rex:rates:latest', payload);
   return payload;
 }
 
 export async function getCachedRates() {
   const cachedData = await kvGet<any>('rex:rates:latest');
-  // Отдаем кэш в любом случае, если он есть в Redis (даже если success=false, лучше отдать старый/частичный курс, чем хардкод)
-  if (cachedData) {
-    return cachedData;
-  }
+  if (cachedData) return cachedData;
   return { 
     usdtRubRaw: 85.3, 
     xeEur: 0.856, 
@@ -344,13 +369,9 @@ const authenticateToken = (req: Request, res: Response, next: any) => {
 
 const checkCronAuth = (req: Request) => {
   const bearer = req.headers.authorization;
-  // 1. Authorize via Bearer Token (Vercel cron)
   if (bearer && process.env.CRON_SECRET && bearer === `Bearer ${process.env.CRON_SECRET}`) return true;
-  // 2. Authorize via Query Secret (cron-job.org)
   if (req.query.secret && process.env.CRON_SECRET && req.query.secret === process.env.CRON_SECRET) return true;
-  // 3. Legacy collector secret
   if (req.headers['x-collector-secret'] && req.headers['x-collector-secret'] === process.env.COLLECTOR_SECRET) return true;
-  
   return false;
 };
 
