@@ -126,21 +126,6 @@ export async function updateCache() {
       workerHeaders["x-worker-secret"] = process.env.WORKER_SECRET;
     }
 
-    const [
-      htxRes, rapiraOpenRes, rapiraDepthRes, bybitRes,
-      coinbaseRes, paprikaRes, fawazRes, cbrRes, erRes
-    ] = await Promise.allSettled([
-      axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
-      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: workerHeaders }),
-      axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", {}, { timeout: 4000, headers: workerHeaders }),
-      axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
-      axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
-      axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", { timeout: 4000 }),
-      axios.get("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usdt.json", { timeout: 4000 }),
-      axios.get("https://www.cbr-xml-daily.ru/daily_json.js", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
-      axios.get("https://open.er-api.com/v6/latest/USD", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } })
-    ]);
-
     const parseDepthBook = (data: any) => {
       if (!data?.ask?.items || !Array.isArray(data.ask.items)) return null;
       let sorted = data.ask.items
@@ -159,6 +144,21 @@ export async function updateCache() {
       
       return { n, bestAsk, top1, top2, top3: picked, pickedIndexFromEnd };
     };
+
+    const [
+      htxRes, rapiraOpenRes, rapiraDepthRes, bybitRes,
+      coinbaseRes, paprikaRes, fawazRes, cbrRes, erRes
+    ] = await Promise.allSettled([
+      axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
+      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: workerHeaders }),
+      axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", {}, { timeout: 4000, headers: workerHeaders }),
+      axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
+      axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
+      axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", { timeout: 4000 }),
+      axios.get("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usdt.json", { timeout: 4000 }),
+      axios.get("https://www.cbr-xml-daily.ru/daily_json.js", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
+      axios.get("https://open.er-api.com/v6/latest/USD", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } })
+    ]);
 
     if (rapiraDepthRes.status === "fulfilled") {
       let meta = parseDepthBook(rapiraDepthRes.value?.data);
@@ -244,7 +244,6 @@ export async function updateCache() {
     // Ignore global errors
   }
 
-  // Приоритет выбора финального курса
   if (!usdtRubRaw) {
     if (sourcesMap.rapiraDepth && sourcesMap.rapiraDepth > 50) {
       usdtRubRaw = sourcesMap.rapiraDepth;
