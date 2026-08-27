@@ -138,10 +138,8 @@ export async function updateCache() {
       let n = sorted.length;
       let bestAsk = sorted[0];
       
-      // Берем 3-ю строчку с самого верха стакана (самые высокие цены).
-      // Визуальный виджет сжимает 24 строки в 12, поэтому 3-я строка сверху в виджете
-      // почти всегда соответствует 3-й строке с конца в сыром массиве (n - 3).
-      let pickedIndex = Math.max(0, n - 3);
+      // БЕРЕМ САМУЮ ВЕРХНЮЮ, МАКСИМАЛЬНУЮ ЦЕНУ ИЗ СТАКАНА
+      let pickedIndex = n - 1;
       let picked = sorted[pickedIndex];
       
       return { n, bestAsk, top1: sorted[n-1], top2: n > 1 ? sorted[n-2] : sorted[n-1], top3: picked, pickedIndex };
