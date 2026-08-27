@@ -138,9 +138,10 @@ export async function updateCache() {
       let n = sorted.length;
       let bestAsk = sorted[0];
       
-      // Нам нужна 10-я строчка снизу (или 3-я сверху в визуальном виджете из 12 строк)
-      // Так как массив начинается с индекса 0, 10-я цена — это индекс 9.
-      let pickedIndex = Math.min(9, n - 1);
+      // Берем 3-ю строчку с самого верха стакана (самые высокие цены).
+      // Визуальный виджет сжимает 24 строки в 12, поэтому 3-я строка сверху в виджете
+      // почти всегда соответствует 3-й строке с конца в сыром массиве (n - 3).
+      let pickedIndex = Math.max(0, n - 3);
       let picked = sorted[pickedIndex];
       
       return { n, bestAsk, top1: sorted[n-1], top2: n > 1 ? sorted[n-2] : sorted[n-1], top3: picked, pickedIndex };
