@@ -131,8 +131,8 @@ export async function updateCache() {
       cbrRes, erRes
     ] = await Promise.allSettled([
       axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
-      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev", { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
-      axios.postForm("https://api.rapira.net/market/exchange-plate-mini", { symbol: "USDT/RUB" }, { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
+      axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
+      axios.postForm("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", { symbol: "USDT/RUB" }, { timeout: 4000, headers: { "User-Agent": BROWSER_UA, Accept: "application/json" } }),
       axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
       axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
       axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", { timeout: 4000 }),
@@ -163,7 +163,10 @@ export async function updateCache() {
     if (rapiraDepthRes.status === "fulfilled" && rapiraDepthRes.value?.data?.ask?.items) {
       const items = rapiraDepthRes.value.data.ask.items;
       if (Array.isArray(items) && items.length > 0) {
-        const item = items.length > 11 ? items[11] : items[items.length - 1];
+        // Берем 3-ю строчку СВЕРХУ из красного стакана (3-я максимальная цена)
+        // API отдает массив от меньшего к большему, поэтому отнимаем 3 с конца
+        const targetIndex = Math.max(0, items.length - 3);
+        const item = items[targetIndex];
         if (item?.price) {
           const p = parseFloat(item.price);
           if (!isNaN(p) && p > 50) sourcesMap.rapiraDepth = p;
@@ -219,15 +222,15 @@ export async function updateCache() {
 
   // Явный приоритет выбора финального курса
   if (!usdtRubRaw) {
-    if (sourcesMap.rapiraOpen && sourcesMap.rapiraOpen > 50) {
+    if (sourcesMap.rapiraDepth && sourcesMap.rapiraDepth > 50) {
+      usdtRubRaw = sourcesMap.rapiraDepth;
+      sourceUsed = "Rapira (Depth)";
+    } else if (sourcesMap.rapiraOpen && sourcesMap.rapiraOpen > 50) {
       usdtRubRaw = sourcesMap.rapiraOpen;
       sourceUsed = "Rapira (Open Market)";
     } else if (sourcesMap.bybitSpot && sourcesMap.bybitSpot > 50) {
       usdtRubRaw = sourcesMap.bybitSpot;
       sourceUsed = "Bybit Spot";
-    } else if (sourcesMap.rapiraDepth && sourcesMap.rapiraDepth > 50) {
-      usdtRubRaw = sourcesMap.rapiraDepth;
-      sourceUsed = "Rapira (Depth)";
     } else if (sourcesMap.htx && sourcesMap.htx > 50) {
       usdtRubRaw = sourcesMap.htx;
       sourceUsed = "HTX P2P";
