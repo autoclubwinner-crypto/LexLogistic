@@ -137,12 +137,13 @@ export async function updateCache() {
       
       let n = sorted.length;
       let bestAsk = sorted[0];
-      let top1 = sorted[n - 1];
-      let top2 = n > 1 ? sorted[n - 2] : top1;
-      let pickedIndexFromEnd = Math.min(3, n);
-      let picked = sorted[n - pickedIndexFromEnd];
       
-      return { n, bestAsk, top1, top2, top3: picked, pickedIndexFromEnd };
+      // Нам нужна 10-я строчка снизу (или 3-я сверху в визуальном виджете из 12 строк)
+      // Так как массив начинается с индекса 0, 10-я цена — это индекс 9.
+      let pickedIndex = Math.min(9, n - 1);
+      let picked = sorted[pickedIndex];
+      
+      return { n, bestAsk, top1: sorted[n-1], top2: n > 1 ? sorted[n-2] : sorted[n-1], top3: picked, pickedIndex };
     };
 
     const [
@@ -151,7 +152,7 @@ export async function updateCache() {
     ] = await Promise.allSettled([
       axios.get("https://otc-api.htx.com/v1/data/trade-market?coinId=2&currency=11&tradeType=sell&currPage=1&payMethod=0&acceptOrder=0&blockType=general&online=1&range=0&amount=50000", { timeout: 4000, headers: { "User-Agent": BROWSER_UA } }),
       axios.get("https://dry-rice-d2fc.autoclubwinner.workers.dev/open", { timeout: 4000, headers: workerHeaders }),
-      axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", {}, { timeout: 4000, headers: workerHeaders }),
+      axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth", "", { timeout: 4000, headers: workerHeaders }),
       axios.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=USDTRUB", { timeout: 4000, headers: { Accept: "application/json" } }),
       axios.get("https://api.coinbase.com/v2/exchange-rates?currency=USDT", { timeout: 4000 }),
       axios.get("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=RUB", { timeout: 4000 }),
@@ -166,7 +167,7 @@ export async function updateCache() {
       // Fallback: Если мини-стакан урезан - запрашиваем полный
       if (meta && (meta.n < 8 || (meta.top1 - meta.bestAsk) < 0.5)) {
         try {
-          const fullRes = await axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth-full", {}, { timeout: 4000, headers: workerHeaders });
+          const fullRes = await axios.post("https://dry-rice-d2fc.autoclubwinner.workers.dev/depth-full", "", { timeout: 4000, headers: workerHeaders });
           const fullMeta = parseDepthBook(fullRes.data);
           if (fullMeta) meta = fullMeta;
         } catch (e) {
